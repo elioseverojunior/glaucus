@@ -1,0 +1,193 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+authors = ["Elio Severo Junior <elioseverojunior@gmail.com>"]
+categories = ["config", "encoding", "parser-implementations"]
+description = "A safe and fast rust library. It's a rust natively YAML 1.2 implementation with YAML 1.1 backward compatibility"
+documentation = "https://docs.rs/glaucus"
+edition = "2024"
+exclude = ["/tests"]
+homepage = "https://elioseverojunior.github.io/glaucus"
+keywords = ["configuration", "markup", "parser", "serialization", "yaml"]
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/elioseverojunior/glaucus"
+rust-version = "1.92"
+version = "0.0.1-1"
+
+[workspace.lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unnameable_types = "warn"
+unreachable_pub = "warn"
+unsafe_op_in_unsafe_fn = "warn"
+unused_lifetimes = "warn"
+unused_macro_rules = "warn"
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+collapsible_if = "allow"
+
+# Lint GROUPS this workspace opts into (all default to `allow`; we raise them to
+# `warn`). priority = -1 so the per-lint overrides further down win over the
+# groups (clippy requires group priority < lint priority for the override to
+# apply). NOTE on "warn" vs "deny": the warnings-as-errors policy lives in ONE
+# place — `-D warnings` in .cargo/config.toml — which escalates EVERY warning
+# (rustc + clippy, local + CI) into a hard error. So "warn" here already means
+# "deny in practice"; writing "deny" per-group would scatter that single policy.
+#   * pedantic — stricter, opinionated correctness/clarity lints.
+#   * nursery  — newer lints still being refined (may evolve); enabled per request.
+#   * cargo    — Cargo.toml hygiene: wildcard/`*` deps, missing metadata, feature names.
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+
+# --- per-lint opt-ins (individual `restriction`-group lints) -----------------
+# The `restriction` group as a whole is too opinionated (many mutually exclusive
+# lints) to enable, so we opt in to just the two that the project's .clippy.toml
+# already tunes: production code must not `.unwrap()`/`.expect()` (a panic is a
+# DoS per CLAUDE.md), while `allow-unwrap-in-tests`/`allow-expect-in-tests` in
+# .clippy.toml keep them ergonomic inside `#[cfg(test)]`.
+expect_used = "warn"
+unwrap_used = "warn"
+
+# --- per-lint opt-outs (default priority 0, so they outrank the groups above) ---
+# Duplicate *transitive* dependency versions are pulled in by upstream crates and
+# are outside this project's control; the rest of `cargo` stays a hard gate.
+multiple_crate_versions = "allow"
+
+# `redundant_pub_crate` (nursery) directly CONTRADICTS the stable rustc
+# `unreachable_pub` lint in [workspace.lints.rust]: the former wants `pub` on a
+# `pub(crate)` item inside a private module, the latter wants `pub(crate)` on a
+# `pub` item that isn't externally reachable. They can't both be satisfied, so the
+# nursery lint yields to the stable one — `pub(crate)` is the correct visibility.
+redundant_pub_crate = "allow"
+
+# Internal crates are declared here once; members bind to them with
+# `<crate>.workspace = true`. The `version` must match `workspace.package.version`
+# (0.0.1-1) — a path dependency's version requirement is still checked against the
+# real crate version, so a stale pin (e.g. 0.1.0) would fail to resolve.
+[workspace.dependencies]
+# --- CLI-only dependencies, all `optional = true` at the member level ---
+anstream = { version = ">=0.6,<2" }
+anyhow = { version = ">=1,<2" }
+# `default-features = false` here so no consumer inherits chrono's default
+# `oldtime`/`clock` surface unasked; `now` + `std` is all `build.rs`'s
+# provenance capture needs. Build-dependency only for `glaucus` (see its
+# Cargo.toml) — it does not appear in `cargo tree -e normal`.
+chrono = { version = ">=0.4,<1.0.0", default-features = false, features = [
+  "now",
+  "std",
+] }
+clap = { version = ">=4,<5", features = ["derive"] }
+clap_complete = { version = ">=4,<5" }
+# `default-features = false` here so satellite crates inherit a minimal facade
+# and opt back in via `features = [...]`; cargo forbids a member flipping this
+# off if the workspace entry leaves it on.
+glaucus = { path = "crates/glaucus", version = "0.0.1-1", default-features = false }
+glaucus-ast = { path = "crates/glaucus-ast", version = "0.0.1-1" }
+glaucus-core = { path = "crates/glaucus-core", version = "0.0.1-1" }
+glaucus-cst = { path = "crates/glaucus-cst", version = "0.0.1-1" }
+glaucus-schema = { path = "crates/glaucus-schema", version = "0.0.1-1" }
+glaucus-serde = { path = "crates/glaucus-serde", version = "0.0.1-1" }
+# Third-party dependencies shared by ≥2 members, pinned once here. Members bind
+# with `<dep>.workspace = true` and layer on extra `features` as needed.
+# `serde` is declared `default-features = false` so no_std-leaning crates inherit
+# a minimal build; every current consumer wants `std` (serde's only default
+# feature) + `derive`, so a bare `serde.workspace = true` reproduces what each
+# crate had before.
+serde = { version = ">=1,<2", default-features = false, features = [
+  "std",
+  "derive",
+] }
+serde_json = { version = ">=1,<2" }
+toml = { version = ">=1.1,<2.0.0" }
+tracing = { version = ">=0.1,<0.2" }
+tracing-subscriber = { version = ">=0.3,<0.4", features = ["env-filter"] }
+unicode-width = { version = ">=0.2,<0.3" }
+# Pinned once so every crate that binds to JS/WASM shares one version.
+wasm-bindgen = { version = ">=0.2,<1" }
+
+# --- Further perf-book levers (https://nnethercote.github.io/perf-book), DEFERRED ---
+# These are NOT [profile.*] settings, and are premature while the parser/binaries
+# are stubs — revisit once there is a real workload + criterion benches to measure:
+#   * target-cpu=native — ~10%+ via AVX/SIMD for the byte-scanner. NON-portable, so
+#     never bake it into distributed binaries; use only for LOCAL measurement, e.g.
+#     `RUSTFLAGS="-C target-cpu=native" mise run bench` to see the speed ceiling.
+#   * Alternative allocator (mimalloc / jemalloc) — large wins for allocation-heavy
+#     code, and a YAML parser is exactly that. Set a `#[global_allocator]` in each
+#     BINARY's main.rs (cli/lsp/mcp), never in the library. Defer until they do work.
+#   * PGO — ~10%+ via `mise run pgo` (cargo-pgo). Two-pass, needs representative
+#     input, and is NOT usable for crates.io-published binaries.
+# Methodology (perf-book): benchmark every change ONE at a time against the benches.
+
+# NOTE on packaging: `exclude` holds exactly one entry, and every published
+# crate opts in with `exclude.workspace = true`, so the policy is stated once.
+#
+# It lists `/tests` and nothing else on purpose. `cargo package` only ever
+# collects files from INSIDE the package's own directory, so nothing at the
+# workspace root — .github/, docs/, CLAUDE.md, deny.toml, target/ — can reach a
+# member's .crate to begin with; naming those here would read like a safeguard
+# while doing nothing. A path is worth excluding only if it is really inside a
+# package, which leaves the integration tests: they exercise this workspace
+# rather than the packaged library, and a consumer building from the registry
+# has no reason to compile them. Everything else already ships just Cargo.toml,
+# README, LICENSE-* and src/.
+#
+# The check that actually protects a release is `mise run publish:dry`, which
+# prints the real file list.
+#
+# docs.rs settings are NOT here either: docs.rs reads `[package.metadata.docs.rs]`
+# per package and has no workspace-level form, and `package.metadata` is not an
+# inheritable field. Each published crate therefore carries its own block.
+
+# --- Performance
+# https://nnethercote.github.io/perf-book/title-page.html
+[profile.dev]
+panic = "abort"
+
+# Optimize DEPENDENCY crates even in debug builds. Deps compile once and are
+# cached, so this barely touches the edit→compile loop on our own crates, but it
+# makes debug `cargo run` / `cargo test` execute close to release speed — useful
+# when exercising the parser over real YAML fixtures locally. (Our own crates
+# stay at opt-level 0 for fast incremental rebuilds.)
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+# MAX RUNTIME SPEED. The previous `opt-level = "z"` optimized for *binary size*,
+# which is the opposite of fast (it suppresses inlining/vectorization). `3` is the
+# fastest codegen and the right default for a parser's hot path.
+opt-level = 3
+# Whole-program, cross-crate inlining: the slowest link, the fastest code. Worth
+# it here because the satellite crates (cli/lsp/mcp) inline straight into `glaucus`.
+lto = "fat"
+# One codegen unit ⇒ the optimizer sees the whole crate at once (no per-unit
+# boundaries to block inlining). Slowest compile, best code.
+codegen-units = 1
+# Drop unwinding tables / landing pads from OUR binaries. (Irrelevant to the
+# published library — a consumer's own profile decides its panic strategy.)
+panic = "abort"
+# Smaller artifacts at zero runtime cost. No debug info is kept here; profile via
+# the `profiling` profile below instead.
+strip = "symbols"
+
+# WASM is downloaded before it runs, so its *size* IS its performance. Keep
+# glaucus-wasm tuned for a small `.wasm` rather than inheriting the native
+# `opt-level = 3` above (which would bloat the module). `"s"` balances size/speed;
+# switch to `"z"` for the smallest possible module.
+[profile.release.package.glaucus-wasm]
+opt-level = "s"
+
+# Release-grade codegen but WITH line-table symbols and no stripping, so
+# `cargo flamegraph` / `perf` can attribute samples back to source. The `flame`
+# mise task builds with this profile (`--profile profiling`).
+[profile.profiling]
+debug = "line-tables-only"
+inherits = "release"
+strip = false

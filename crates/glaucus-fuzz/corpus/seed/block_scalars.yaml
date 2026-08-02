@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+literal: |
+  line1
+  line2
+folded: >
+  paragraph
+  one
+
+  paragraph
+  two

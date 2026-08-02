@@ -1,0 +1,69 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Git
+#
+# `.git` is intentionally NOT excluded. `crates/glaucus/build.rs` runs `git
+# rev-parse --short=12 HEAD` (and `git status --porcelain` for the `-dirty`
+# suffix) to stamp `GIT_COMMIT` into every binary's `--version` output; it
+# degrades to `unknown` rather than failing when `.git` is absent, so nothing
+# would have warned that provenance had gone silently useless in exactly the
+# artefact where it matters most. `build.rs` has no environment-variable
+# override for this (unlike `RUSTC_VERSION`), and it lives under `crates/`,
+# out of this task's scope to add one to -- so excluding `.git` from the build
+# context was the only way this ever broke, and un-excluding it is the fix.
+# The repo's `.git` is ~14 MB, not the multi-GB `target/` this file exists to
+# keep out, so the context-size cost is negligible.
+#
+# Trade-off worth knowing: `docs/`, `scripts/` and non-README `*.md` stay
+# excluded below for their own (much larger) size reasons, but they ARE
+# git-tracked. With `.git` present and those paths absent, `git status
+# --porcelain` sees them as locally deleted, so every image -- even from a
+# clean tagged release -- reports `<hash>-dirty` rather than a bare hash.
+# `-dirty` therefore stops meaning "uncommitted changes" and starts meaning
+# "built inside a Dockerfile whose context trims non-code paths" -- still far
+# better than the previous `unknown`, but not literally accurate. Fixing that
+# fully would mean either shipping `docs/`/`scripts/` in every build context
+# (defeats the purpose of excluding a 300+ MB docs site) or teaching
+# `build.rs` to scope `git status` to build-relevant paths, which is out of
+# this task's scope (`crates/` is off-limits here). Documented instead of
+# silently accepted.
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.iml
+
+# Build artifacts
+target/
+*.log
+
+# Documentation
+*.md
+!README.md
+docs/
+ROAD_MAP.md
+CONFIGURATION.md
+DOCKER.md
+QUICKSTART.md
+LOCALSTACK.md
+
+# Config examples (we'll mount these)
+config/
+
+# LocalStack
+backend/continuous-development/localstack-init/
+docker-compose.yml
+
+# Scripts
+scripts/
+
+# Environment
+.env
+.env.*
+
+# Test files
+tests/
+*.test

@@ -1,0 +1,165 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# commit-types.toml ~ SINGLE SOURCE OF TRUTH for conventional-commit types.
+#
+# This is the ONLY file you edit when commit types, their changelog grouping, or
+# the shared subject rules change. Everything else is generated from it:
+#
+#     mise run commit-config         # regenerate the derived files
+#     mise run commit-config-check   # drift guard: fail if any derived file is stale
+#
+# Generated outputs (do not hand-edit the marked regions):
+#   - committed.toml            -> whole file (commit-message linter rules + allowed_types)
+#   - cliff.toml                -> the `commit_parsers` array (changelog grouping)
+#   - .gitmessage               -> the human-readable type list shown in the editor
+#
+# The generator lives at scripts/commit-config.py (zero deps, stdlib `tomllib`).
+
+# ---------------------------------------------------------------------------
+# [commit] — shared subject/style rules consumed by committed.toml generation.
+# These encode the project's commit conventions (see .gitmessage): conventional
+# style, lowercase imperative subject, no trailing period, 50/72 wrapping.
+# ---------------------------------------------------------------------------
+[commit]
+imperative_subject = true # "add" not "added"/"adds" (e.g. "initialize", not "initial commit")
+line_length = 72 # body line wrap
+merge_commit = true # ignore merge commits (don't lint them)
+no_fixup = true # reject un-squashed fixup! commits
+no_wip = true # reject WIP commits from landing
+style = "conventional"
+subject_capitalized = false # project convention: do NOT capitalize the subject
+subject_length = 50 # subject (the description after `type:`) max length
+subject_not_punctuated = true # no trailing period on the subject
+
+# ---------------------------------------------------------------------------
+# [[type]] — the developer-facing conventional-commit types.
+#
+#   name    feeds committed `allowed_types` AND cliff's `^<name>` parser AND the
+#           .gitmessage list. `pattern` overrides the default `^<name>` regex.
+#   emoji   + group + order build cliff's changelog group label:
+#           "<!-- {order} -->{emoji} {group}". Types may share a group/order
+#           (chore, ci, build all bucket into Miscellaneous Tasks at order 7).
+#   desc    one-line help shown in .gitmessage.
+#   committed (default true) — set false for a type cliff should still bucket in
+#           the changelog but that committed must reject in NEW commits (a
+#           descriptive-only, historical type).
+# Order numbers mirror the historical cliff grouping; gaps (8, 10) are reserved
+# for the cliff-only Security/Other groups defined under [cliff] below.
+# ---------------------------------------------------------------------------
+[[type]]
+desc = "a new feature"
+emoji = "🚀"
+group = "Features"
+name = "feat"
+order = 0
+
+[[type]]
+desc = "a bug fix"
+emoji = "🐛"
+group = "Bug Fixes"
+name = "fix"
+order = 1
+
+[[type]]
+desc = "a change that neither fixes a bug nor adds a feature"
+emoji = "🚜"
+group = "Refactor"
+name = "refactor"
+order = 2
+
+[[type]]
+desc = "documentation only changes"
+emoji = "📚"
+group = "Documentation"
+name = "docs"
+order = 3
+
+[[type]]
+desc = "a performance improvement"
+emoji = "⚡"
+group = "Performance"
+name = "perf"
+order = 4
+
+[[type]]
+desc = "formatting, whitespace; no code-behavior change"
+emoji = "🎨"
+group = "Styling"
+name = "style"
+order = 5
+
+[[type]]
+desc = "adding or correcting tests; no production code change"
+emoji = "🧪"
+group = "Testing"
+name = "test"
+order = 6
+
+[[type]]
+desc = "tooling, configs, housekeeping; no production code change"
+emoji = "⚙️"
+group = "Miscellaneous Tasks"
+name = "chore"
+order = 7
+
+[[type]]
+desc = "changes to CI configuration files and scripts"
+emoji = "⚙️"
+group = "Miscellaneous Tasks"
+name = "ci"
+order = 7
+
+[[type]]
+desc = "changes to the build system or external dependencies"
+emoji = "⚙️"
+group = "Miscellaneous Tasks"
+name = "build"
+order = 7
+
+[[type]]
+desc = "initialize a repository (allowed so a fresh repo can bootstrap)"
+emoji = "🎉"
+group = "Repository Initialization"
+name = "init"
+order = 7
+
+[[type]]
+desc = "revert a previous commit"
+emoji = "◀️"
+group = "Revert"
+name = "revert"
+order = 9
+
+# ---------------------------------------------------------------------------
+# [cliff] — cliff-ONLY parsers that are not developer-facing commit types and so
+# live nowhere else (no SSOT duplication). The generator emits skips first (they
+# are exclusionary guards), then the per-type parsers above sorted by `order`,
+# then these extra parsers sorted by `order`.
+# ---------------------------------------------------------------------------
+[cliff]
+# Commit subjects matching these are dropped from the changelog entirely.
+skip_messages = [
+  "^chore\\(release\\): prepare for",
+  "^chore\\(deps.*\\)",
+  "^chore\\(pr\\)",
+  "^chore\\(pull\\)",
+]
+
+# Security commits are matched by BODY (e.g. a "BREAKING ... security" note),
+# not by type prefix, so they get their own parser.
+[[cliff.extra_parser]]
+emoji = "🛡️"
+field = "body"
+group = "Security"
+order = 8
+pattern = ".*security"
+
+# Catch-all: anything unmatched (including non-conventional history) lands here.
+[[cliff.extra_parser]]
+emoji = "💼"
+field = "message"
+group = "Other"
+order = 10
+pattern = ".*"

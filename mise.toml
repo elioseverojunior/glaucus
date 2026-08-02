@@ -1,0 +1,2954 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# mise configuration ~ https://mise.jdx.dev
+#
+# mise provisions the Rust toolchain, but the VERSION stays defined once in
+# `rust-toolchain.toml` (the canonical file rustup, cargo and IDEs also read).
+# Enabling the idiomatic-version-file setting below lets mise install Rust from
+# that file, so there is a single source of truth and no drift. Node works the
+# same way: its version lives in package.json's `devEngines.runtime`. Auxiliary
+# tools (git-cliff, hk, etc.) are pinned explicitly in [tools] below.
+
+[settings]
+color = true
+experimental = true
+idiomatic_version_file = true
+idiomatic_version_file_enable_tools = []
+legacy_version_file = false
+lockfile = true
+not_found_auto_install = true
+python.uv_venv_auto = "create|source"
+quiet = true
+### Debug
+#verbose = true
+#log_level = "debug"
+
+[env]
+ARCH = "{{exec(command='uname -m')}}"
+# No GITHUB_TOKEN here. `{{env.GITHUB_TOKEN | default(value='')}}` assigned the
+# variable to itself when set -- a no-op -- and to the EMPTY STRING when not,
+# which is the damaging case: mise resolves a github.com token from
+# MISE_GITHUB_TOKEN, then GITHUB_API_TOKEN, then GITHUB_TOKEN, first one found
+# winning (https://mise.jdx.dev/dev-tools/github-tokens.html). An empty
+# GITHUB_TOKEN still occupies that third slot, shadowing the credential-command,
+# OAuth and git-credential sources below it, so mise fell back to unauthenticated
+# rate-limited API calls. Omitted, an ambient token passes through untouched and
+# the fallbacks stay reachable. Set MISE_GITHUB_TOKEN to authenticate mise itself
+# -- slot 1, so nothing can shadow it.
+PROJECT_NAME = "{{exec(command='basename $(git config --get remote.origin.url) .git || {{ config_root }}')}}"
+RUST_COVERAGE_THRESHOLD = "100"
+_.file = ".env"
+
+[tools]
+# rust is provisioned from rust-toolchain.toml via [settings] above — no version
+# is repeated here, keeping rust-toolchain.toml the single source of truth.
+"cargo:cargo-audit" = { version = "latest" }
+"cargo:cargo-crap" = { version = "latest" }
+"cargo:cargo-criterion" = { version = "latest" }
+"cargo:cargo-deny" = { version = "latest" }
+"cargo:cargo-edit" = { version = "latest" }
+"cargo:cargo-fuzz" = { version = "latest" }
+"cargo:cargo-machete" = { version = "latest" }
+"cargo:cargo-mutants" = { version = "latest" }
+"cargo:cargo-nextest" = { version = "latest" }
+"cargo:cargo-pgo" = { version = "latest" }
+"cargo:cargo-semver-checks" = { version = "latest" }
+"cargo:cargo-sort" = { version = "latest" }
+"cargo:cargo-tarpaulin" = { version = "latest" }
+"cargo:cargo-update" = { version = "latest" }
+"cargo:cargo-wizard" = { version = "latest" }
+"cargo:committed" = { version = "latest" }
+"cargo:flamegraph" = { version = "latest" }
+"cargo:rumdl" = { version = "latest" }
+"cargo:taplo-cli" = { version = "latest" }
+"cargo:yamllint-rs" = { version = "latest" }
+
+# comply is deliberately NOT here, for the same reason as ignorefile below.
+#
+# It is a git-source install, and cargo-binstall cannot serve one: comply is on
+# crates.io only as semver prereleases (0.0.1-1, 0.1.0-9), which `cargo install`
+# skips, and its GitHub releases publish no binary assets. Every `mise install`
+# therefore compiled it from source -- roughly 3.5 minutes, in EVERY job of every
+# run. Run 30706537351 spent 7m19s in `mise install --locked` and was cancelled
+# still compiling.
+#
+# `.github/actions/setup-rust-env` installs it once instead, pinned to a rev and
+# guarded by the ~/.cargo/bin cache, so it is built on a cache miss rather than
+# on every job. Local developers get it from `mise run comply:install`.
+
+# Python
+"pipx:codecov-cli" = { version = "latest" }
+
+# Binaries registries or from sources if architecture is not supported
+"aqua:hk" = { version = "latest", os = [
+  "linux",
+  "windows",
+  "macos/arm64",
+], arch = [
+  "arm64",
+  "x64",
+], locked = false }
+
+# Binaries from mise registries:
+actionlint = { version = "latest" }
+git-cliff = { version = "latest" }
+gitleaks = { version = "latest" }
+# ignorefile is deliberately NOT here. Its three binaries live in one git
+# workspace and none is on crates.io yet, and mise's cargo backend cannot pass a
+# package selector to `cargo install --git` -- it emits a bare
+# `cargo install --git=<url>`, which cargo rejects with "multiple packages with
+# binaries found". Both `bin` and `crate` are ignored. `mise run
+# ignorefile:install` does it instead; move it here once the crates publish.
+scorecard = { version = "latest" }
+taplo = { version = "latest" }
+
+[hooks]
+enter = { task = "setup" }
+postinstall = '''
+echo "Installed: $MISE_INSTALLED_TOOLS"
+'''
+
+# No `[deps.bun] auto = true`. `auto` runs `bun install` before EVERY task, the
+# Rust gates included, and the CI container provisions no bun -- so the coverage
+# job dies before it starts with "failed to execute command: bun install / No
+# such file or directory". Moving package.json back under `docs/` did NOT fix
+# this: the dependency is declared here, not inferred from where a manifest sits,
+# so it fires regardless. It is also invisible on a developer machine that has
+# bun on PATH, which is why it reads as harmless until CI runs.
+#
+# It contradicts the note above the docs tasks besides -- a broken docs build
+# must not fail the crate gate. The three tasks that need the dependencies
+# (`docs:install`, `docs:build`, `docs:typecheck`) each run `bun install`
+# themselves and set `dir = "docs"`, so nothing is lost by leaving it out.
+
+[deps.cargo]
+auto = true
+
+[deps.gh]
+auto = true
+
+[tasks."act:setup"]
+alias = []
+description = "Create the .act/ scratch files .actrc points at (idempotent)"
+hide = true
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# `if` blocks, not `[ ! -f x ] && cmd`: as the final statement that idiom makes
+# the whole task exit 1 once the file exists, which broke every run after the
+# first -- and `act` depends on this task, so `mise run act` never started.
+mkdir -p .act/
+
+if [ ! -f ".act/README.md" ]; then
+  cat <<-'README' > ".act/README.md"
+# [Nektos/ACT](https://nektosact.com)
+
+This folder must not have any file commited except this README.md
+README
+fi
+
+# .actrc passes --secret-file/--var-file/--eventpath unconditionally, so act
+# aborts if any of these is absent. .secrets holds a live token at run time and
+# is created 0600 here so it is never briefly world-readable.
+for f in .act/.vars .act/.env; do
+  [ -f "$f" ] || touch "$f"
+done
+
+# act 0.2.89's artifact server implements an older revision of the v4 artifact
+# protocol: it rejects the `mime_type` field upload-artifact v7 sends, the
+# request body fails to decode, and the step burns five retries before failing a
+# run that otherwise passed. There is no newer act to upgrade to and no per-step
+# skip flag, so the workflow reads this variable and act supplies it here.
+#
+# Appended rather than written, and guarded on the key rather than the file, so
+# a .vars the developer has added their own entries to survives, and a second
+# run does not add a duplicate line.
+if ! grep -q '^UPLOAD_ARTIFACTS=' .act/.vars 2>/dev/null; then
+  echo "UPLOAD_ARTIFACTS=false" >> .act/.vars
+fi
+
+# The act-only checkout in .github/workflows/tests/*.yml is gated on
+# `vars.ACT == 'true'`, and nothing was writing it -- so `vars.ACT` was always
+# empty, the `!= 'true'` branch always won, and act ran the REAL
+# actions/checkout: a network fetch of `github.ref` that dies with
+# `upload-pack: not our ref` on any commit not pushed yet, which is every commit
+# worth testing locally. act's own ACT=true env var is not visible to `vars.*`
+# (that namespace is fed exclusively by --var-file), so it has to be set here.
+#
+# Same guarded append as above: a developer's own .vars entries survive, and a
+# second run does not duplicate the line.
+if ! grep -q '^ACT=' .act/.vars 2>/dev/null; then
+  echo "ACT=true" >> .act/.vars
+fi
+
+if [ ! -f ".act/.secrets" ]; then
+  touch .act/.secrets
+  chmod 600 .act/.secrets
+fi
+# A populated repository stanza, not `{}`: third-party actions read
+# `payload.repository.owner` and die with "Cannot read properties of undefined"
+# on an empty event, which is what made the Secrets Scan job unrunnable locally.
+# Owner/name come from the git remote so the payload matches the real repo.
+if [ ! -f ".act/event.json" ]; then
+    # Parameter expansion, not sed: BSD sed has no lazy quantifier, so an ERE
+    # that works on GNU fails on macOS with "repetition-operator operand invalid".
+    slug=$(git remote get-url origin 2>/dev/null || true)
+    slug=${slug%.git}
+    slug=${slug#*://}
+    slug=${slug#*@}
+    slug=${slug#*:}
+    name=${slug##*/}
+    owner=${slug%/*}
+    owner=${owner##*/}
+    : "${owner:=local}"
+    : "${name:=$(basename "$PWD")}"
+    sha=$(git rev-parse HEAD 2>/dev/null || echo 0000000000000000000000000000000000000000)
+    branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo main)
+    # `commits` and `ref` matter as much as `repository`: a push-event consumer
+    # reads `eventJSON.commits.length` and dies on an empty object.
+    printf '%s\n' \
+      '{' \
+      "  \"ref\": \"refs/heads/$branch\"," \
+      "  \"before\": \"$sha\"," \
+      "  \"after\": \"$sha\"," \
+      "  \"commits\": [ { \"id\": \"$sha\" } ]," \
+      '  "repository": {' \
+      "    \"name\": \"$name\"," \
+      "    \"full_name\": \"$owner/$name\"," \
+      "    \"default_branch\": \"$branch\"," \
+      '    "private": false,' \
+      "    \"owner\": { \"login\": \"$owner\", \"name\": \"$owner\" }" \
+      '  }' \
+      '}' > .act/event.json
+fi
+'''
+
+[tasks.act]
+alias = []
+depends = ["act:setup"]
+description = "Run a workflow locally with Nektos/act, e.g. `mise run act -w ci -j formatting`"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Was `-W .github/workflows/tests/<name>.yml`, a path copied from another repo
+# that does not exist here, so every invocation failed on a missing file.
+workflow=".github/workflows/${usage_workflow?}.yml"
+if [ ! -f "$workflow" ]; then
+  echo "No such workflow: $workflow" >&2
+  echo "Available:" >&2
+  basename -s .yml .github/workflows/*.yml | sed 's/^/  /' >&2
+  exit 1
+fi
+
+gh auth token > /dev/null 2>&1 || { echo "gh is not authenticated; run: gh auth login" >&2; exit 1; }
+
+# The token reaches act through the ENVIRONMENT: `-s NAME` with no value makes
+# act read NAME from the environment instead of taking it inline.
+#
+# It was `-s "GITHUB_TOKEN=$(gh auth token)"`, which put the token in argv, and
+# argv is world-readable -- `ps` printed the live `gho_...` to every process on
+# the machine for as long as the run lasted. A file is not the alternative
+# either: gitleaks does not read .gitignore, so `gitleaks dir` flagged
+# .act/.secrets as a real leak, and act copies the whole working tree into the
+# container. .actrc still requires that file to exist, so act:setup leaves it
+# empty. The environment is the one channel that is neither world-readable nor
+# on disk.
+# .actrc hardcodes --container-daemon-socket=/var/run/docker.sock, which exists
+# only for some runtimes -- under Docker Desktop or colima on macOS the socket
+# lives elsewhere, and act then fails with "no such file or directory" before it
+# runs a single step. Resolve the endpoint the docker CLI is actually using, and
+# fall back to the first context that answers.
+socket="${DOCKER_HOST:-}"
+if [ -z "$socket" ]; then
+    socket=$(docker context inspect 2>/dev/null | jq -r '.[0].Endpoints.docker.Host // empty')
+fi
+if [ -z "$socket" ] || ! docker --host "$socket" info >/dev/null 2>&1; then
+    for candidate in $(docker context ls --format json 2>/dev/null | jq -r '.DockerEndpoint // empty'); do
+        if docker --host "$candidate" info >/dev/null 2>&1; then
+            socket="$candidate"
+            break
+        fi
+    done
+fi
+if [ -z "$socket" ] || ! docker --host "$socket" info >/dev/null 2>&1; then
+    echo "No reachable Docker daemon. Start Docker Desktop or run: colima start" >&2
+    exit 1
+fi
+echo "Using Docker daemon at $socket"
+
+# .actrc passes --detect-event, which picks `pull_request` for a workflow that
+# declares both triggers. Locally there is no PR, so actions that query the PR
+# API call `/pulls//commits` with an empty number and 404. A working tree is a
+# push, so select that explicitly whenever the workflow accepts one.
+event=()
+if grep -qE '^[[:space:]]*push:' "$workflow"; then
+    event=(push)
+fi
+
+args=("${event[@]}" -W "$workflow" -s GITHUB_TOKEN)
+# `-` disables bind-mounting the socket into the job container. act mounts it by
+# default so a workflow can talk to Docker, which none of these do -- and under
+# colima the socket lives inside a VM, so the mount fails outright with
+# "operation not supported". DOCKER_HOST below is what act itself connects on.
+args+=(--container-daemon-socket -)
+[ -n "${usage_job:-}" ] && args+=(-j "$usage_job")
+# Assigned on the command as a prefix, so the value lands in act's environment
+# and never in its argv. mise.toml's [env] exports GITHUB_TOKEN as the empty
+# string when nothing is set, so it has to be assigned HERE rather than relied on
+# -- an empty value would make act prompt for the secret and hang the run.
+GITHUB_TOKEN="$(gh auth token)" DOCKER_HOST="$socket" act "${args[@]}"
+'''
+usage = '''
+flag "-w --workflow <workflow>" help="Workflow basename under .github/workflows" default="ci" env="ACT_WORKFLOW"
+flag "-j --job <job>" help="Single job id to run; omit to run the whole workflow" env="ACT_JOB"
+'''
+
+[tasks.all]
+alias = []
+description = "Run all local development tasks"
+hide = true
+run = '''
+mise lock
+mise run ci:fix
+mise run build:install
+mise run git:amend:push:force
+'''
+
+[tasks."git:ignore:check"]
+alias = ["gitignore", "ignore:check"]
+description = "Git Ignore Check"
+hide = true
+run = '''
+git check-ignore -v .act/.secrets .act/.vars .act/.env .act/event.json .act/README.md
+'''
+
+[tasks."git:commit:amend"]
+alias = ["git:amend", "gca"]
+description = "Git Commit Saged with Amend"
+hide = true
+run = '''
+git add -A .
+git commit -S --amend --no-edit --reset-author
+'''
+
+[tasks."git:commit:push:force"]
+alias = ["gpf"]
+description = "Git Commit Staged with Amend"
+hide = true
+run = '''
+git push --force-with-lease || git push --force
+date
+'''
+
+[tasks."git:commit:amend:push:force"]
+alias = ["gcapf", "git:amend:push:force"]
+description = "Git Commit Staged with Amend"
+hide = true
+run = '''
+mise run git:amend
+mise run git:commit:push:force
+date
+'''
+
+[tasks."hk:chek"]
+alias = ["hook:check"]
+description = "HK Hook Check"
+hide = true
+run = '''
+hk check --all
+'''
+
+[tasks."hk:fix"]
+alias = ["hook:fix"]
+description = "HK Hook Fix"
+hide = true
+run = '''
+hk fix --stage --all
+'''
+
+# === Tool Installation ===
+[tasks.setup]
+alias = ["install", "dev", "dev:setup", "dev:up"]
+description = "Install tools, sourcing from Homebrew when it matches the pin"
+run = '''
+set -eo pipefail
+
+# Homebrew is preferred on macOS when present, but ONLY for a tool whose
+# installed version already equals the pin in [tools] above. None of these ship
+# a versioned formula (there is no swiftlint@0.65.0), so brew tracks whatever is
+# current — honouring it blindly would silently break the pinning this file
+# exists to guarantee. On any mismatch the pin wins and mise installs the tool.
+#
+# Formula names only; versions are read back from [tools] so mise.toml stays the
+# single source of truth.
+BREW_TOOLS="git-cliff gitleaks gh jq rustup scorecard uv yq"
+
+root="$(git rev-parse --show-toplevel)"
+local_cfg="$root/mise.local.toml"
+
+# An empty MISE_DISABLE_TOOLS overrides whatever mise.local.toml sets, so the
+# lockfile is always written from the FULL toolset. A disabled tool is omitted
+# from mise.lock entirely, and a brew machine committing such a lockfile would
+# leave non-brew machines unresolvable. This is why locking no longer needs to
+# delete the local config first.
+MISE_DISABLE_TOOLS= mise lock
+
+have_brew=no
+if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+  have_brew=yes
+fi
+
+# One batched call: six separate `brew list` invocations cost roughly 5x more.
+brew_versions() {
+  [ "$have_brew" = yes ] || return 0
+  brew list --versions $BREW_TOOLS 2>/dev/null | sort || true
+}
+
+# `mise ls --current` merges the global config, so intersecting with BREW_TOOLS
+# below keeps this to the project's own tools.
+pins="$(MISE_DISABLE_TOOLS= mise ls --current --json | jq -r 'to_entries[] | "\(.key) \(.value[0].requested_version)"' | sort)"
+
+# Fingerprint every input that decides this file's content. Hashing mise.lock
+# alone is NOT sufficient: Homebrew moving swiftlint 0.65.0 -> 0.66.0 must force
+# a rewrite, and nothing about that touches the lockfile.
+fingerprint() {
+  printf '%s\n' \
+    "v1" "$(uname -s)" "$(uname -m)" "$have_brew" "$pins" "$(brew_versions)" \
+    "$(shasum -a 256 "$root/mise.lock" 2>/dev/null | cut -d" " -f1)" \
+    | shasum -a 256 | cut -d" " -f1
+}
+
+# `mise install` can settle new entries into mise.lock — a first-time install of
+# a version, or a tool added since the last lock — which leaves the fingerprint
+# just written already stale and costs one redundant rebuild on the next run.
+# Re-stamping afterwards makes the cache converge in a single run.
+refresh_fp() {
+  [ -f "$local_cfg" ] || return 0
+  local now tmp
+  now="$(fingerprint)"
+  if grep -qF "# fingerprint: $now" "$local_cfg"; then
+    return 0
+  fi
+  tmp="$(mktemp)"
+  awk -v fp="$now" '/^# fingerprint: /{ print "# fingerprint: " fp; next } { print }' "$local_cfg" > "$tmp"
+  mv "$tmp" "$local_cfg"
+}
+
+fp="$(fingerprint)"
+if [ -f "$local_cfg" ] && grep -qF "# fingerprint: $fp" "$local_cfg"; then
+  echo "mise.local.toml up to date ($(printf '%s' "$fp" | cut -c1-12))"
+  mise install
+  mise deps
+  refresh_fp
+  exit 0
+fi
+
+lookup() { printf '%s\n' "$2" | awk -v t="$1" '$1 == t { print $2 }'; }
+
+brewed=""
+installed_any=no
+if [ "$have_brew" = yes ]; then
+  state="$(brew_versions)"
+  missing=""
+
+  for f in $BREW_TOOLS; do
+    pin="$(lookup "$f" "$pins")"
+    [ -n "$pin" ] || continue
+    inst="$(lookup "$f" "$state")"
+
+    if [ -z "$inst" ]; then
+      missing="$missing $f"
+    elif [ "$pin" = "latest" ] || [ "$pin" = "$inst" ]; then
+      brewed="$brewed $f"
+      echo "brew $f $inst"
+    else
+      echo "mise $f $pin (Homebrew has $inst)"
+    fi
+  done
+
+  # Only tools that are not installed yet need the slow formula API, and they
+  # are queried in a single batched call.
+  if [ -n "$missing" ]; then
+    stables="$(brew info --json=v2 $missing 2>/dev/null | jq -r '.formulae[] | "\(.name) \(.versions.stable)"' || true)"
+    for f in $missing; do
+      pin="$(lookup "$f" "$pins")"
+      stable="$(lookup "$f" "$stables")"
+      if [ -n "$stable" ] && { [ "$pin" = "latest" ] || [ "$pin" = "$stable" ]; }; then
+        brew install "$f"
+        brewed="$brewed $f"
+        installed_any=yes
+        echo "brew $f $stable (installed)"
+      else
+        echo "mise $f $pin${stable:+ (Homebrew has $stable)}"
+      fi
+    done
+  fi
+fi
+
+# Installing changed what brew reports, so the fingerprint must be recomputed or
+# the next run would see a mismatch and redo all of this for nothing.
+[ "$installed_any" = yes ] && fp="$(fingerprint)"
+
+# disable_tools makes mise step aside so its shims stop shadowing Homebrew's
+# bin. Machine-specific, hence mise.local.toml rather than mise.toml.
+{
+  echo "# Generated by \`mise run install\` - machine-specific, not committed."
+  echo "# fingerprint: $fp"
+  if [ -n "$brewed" ]; then
+    echo "# Tools Homebrew satisfies at the pinned version; mise handles the rest."
+    echo "[settings]"
+    printf 'disable_tools = ['
+    sep=""
+    for f in $brewed; do
+      printf '%s"%s"' "$sep" "$f"
+      sep=", "
+    done
+    printf ']\n'
+  fi
+  # hk ships a darwin/arm64 build but no darwin/amd64 one, and mise has no way
+  # to gate a tool on architecture (see the [tools] comment). Adding it here
+  # keeps Apple Silicon covered without breaking Intel Macs.
+  if [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; then
+    echo '[tools]'
+    echo '"aqua:hk" = { version = "latest", locked = false }'
+  fi
+} > "$local_cfg"
+
+mise lock
+mise install
+mise deps
+refresh_fp
+'''
+shell = "bash -c"
+
+[tasks."git:hooks:install"]
+alias = []
+description = "Install the git hooks managed by hk (global install for Git 2.54+)"
+run = "hk install"
+
+[tasks."git:hooks:install:global"]
+alias = []
+description = "Install the git hooks managed by hk (global install for Git 2.54+)"
+run = "mise run git:hooks:install --global"
+
+[tasks."git:hooks:install:local"]
+alias = []
+description = "Install the git hooks managed by hk (global install for Git 2.54+)"
+run = "mise run git:hooks:install --force-local"
+
+# -- Local release tags --
+#
+# Two kinds of tag, from one version. The exact tag (`v0.0.1-1`, GitVersion's
+# SemVer) names a unique point in history and is created once. The floating tags
+# (`v0.0.1`, `v0.0`, `v0`) are pointers that move to the newest release sharing
+# those leading numbers, so `v0` always answers "latest 0.x".
+#
+# They are derived from the exact tag by string surgery rather than from a second
+# `version:json` call, so an explicitly named tag floats identically to a derived
+# one and neither path needs gitversion twice.
+#
+# Neither task pushes, and neither has a remote-deleting counterpart: publishing
+# a tag is a separate, deliberate act, and `git push --delete` on a tag someone
+# already fetched is not undoable from here.
+
+[tasks."git:tag:create"]
+alias = ["tag:create"]
+description = "Create a signed, annotated tag locally and move the floating tags onto it. Never pushes"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+TAG="${usage_tag:-$(mise run version:tag)}"
+
+if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    echo "error: tag ${TAG} already exists; delete it first:" >&2
+    echo "       mise run git:tag:delete ${TAG}" >&2
+    exit 1
+fi
+
+# A tag names a commit, so uncommitted work is not in what gets tagged. Worth
+# saying out loud, not worth refusing over.
+if [ -n "$(git status --porcelain)" ]; then
+    echo "warning: working tree is dirty -- ${TAG} points at HEAD, without those changes." >&2
+fi
+
+git tag -s "${TAG}" -m "${usage_message:-${TAG}}"
+echo "created ${TAG} at $(git rev-parse --short HEAD); local only, not pushed"
+
+if [ "${usage_exact:-}" = "true" ]; then
+    exit 0
+fi
+
+# -f because floating tags exist to be repointed; a tag equal to the exact one
+# (a SemVer with no pre-release) is skipped rather than force-rewritten.
+for float in $(mise run version:tags:floating "${TAG}"); do
+    if [ "${float}" != "${TAG}" ]; then
+        git tag -f -s "${float}" -m "${float}" >/dev/null
+        echo "moved ${float} -> $(git rev-parse --short HEAD)"
+    fi
+done
+'''
+shell = "bash -c"
+usage = '''
+arg "[tag]" help="exact tag name, e.g. v0.0.1-1; defaults to the version:tag derivation"
+flag "-m --message <message>" help="annotation message; defaults to the tag name"
+flag "--exact" help="create only the exact tag; leave the floating tags where they are"
+'''
+
+[tasks."git:tag:delete"]
+alias = ["tag:delete"]
+description = "Delete a LOCAL tag by name. Never touches a remote"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# The tag is named, never derived. `version:tag` reads gitversion, and gitversion
+# reads the tags -- so the moment `git:tag:create` lands `v0.0.1`, the derivation
+# stops answering `v0.0.1-1` and starts answering `v0.0.1`. A delete that guessed
+# would remove a different tag from the one create had just made.
+TAG="${usage_tag}"
+
+if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+    echo "error: no local tag ${TAG}." >&2
+    exit 1
+fi
+
+git tag -d "${TAG}"
+
+# Floating tags are NOT removed by default: `v0` points at whichever release is
+# newest, which is usually not the one being deleted, so taking it away would
+# drop a pointer to a release this command never touched.
+if [ "${usage_floating:-}" = "true" ]; then
+    for float in $(mise run version:tags:floating "${TAG}"); do
+        if [ "${float}" != "${TAG}" ] && git rev-parse -q --verify "refs/tags/${float}" >/dev/null; then
+            git tag -d "${float}"
+        fi
+    done
+fi
+'''
+shell = "bash -c"
+usage = '''
+arg "<tag>" help="exact tag name to delete, e.g. v0.0.1-1 (required; never derived)"
+flag "--floating" help="also delete the floating tags that this version would move"
+'''
+
+# GitVersion derives the version from the TAG GRAPH, and `git fetch` does NOT
+# update a tag that already exists locally -- so a tag rewritten upstream stays
+# pinned to the old commit forever, silently.
+#
+# That is not hypothetical. `v0.0.1-1` pointed at a pre-rewrite commit locally
+# and at the init commit on origin. Locally GitVersion found no REACHABLE source,
+# counted from the root and said 0.1.0-10; CI fetched origin's tags, anchored on
+# the init commit and said 0.1.0-9. Same commit, same GitVersion 6.8.2, one
+# off-by-one -- and it only surfaced because a workflow warned that Cargo.toml
+# disagreed with the run.
+#
+# Never fatal. A version task has to keep working offline and in a clone with no
+# remote; a stale graph gives a wrong answer, no network merely gives an old one.
+[tasks."git:tags:fetch"]
+alias = []
+description = "Force-refresh tags from origin so GitVersion sees the graph CI sees"
+hide = true
+run = '''
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+git rev-parse --git-dir >/dev/null 2>&1 || exit 0
+git remote get-url origin >/dev/null 2>&1 || exit 0
+
+# `--force` is the whole point: without it git leaves an existing tag alone and
+# the refresh is a no-op precisely when it matters.
+git fetch --tags --force --quiet origin 2>/dev/null || {
+    echo "version: could not reach origin; tags may be stale and the computed version wrong" >&2
+    exit 0
+}
+'''
+shell = "bash -c"
+
+# Emits the GitVersion stamp the router serves from GET /version. Hidden because
+# it is plumbing: the compose tasks source it, nobody runs it directly. Failure is
+# not fatal — an unstamped deployment answers "unknown", which beats refusing to
+# start over a version string.
+[tasks."version:json"]
+alias = []
+# Every version answer in this file routes through here -- `version`,
+# `version:tag`, `version:sync --from-git` and `release:prepare` all shell out
+# to it -- so refreshing tags at this one point makes all four correct by
+# construction rather than each remembering to do it.
+depends = ["git:tags:fetch"]
+description = "Print the GitVersion JSON for the working tree, or an empty object"
+hide = true
+run = '''
+#!/usr/bin/env bash
+set -eo pipefail
+# `/nocache` because GitVersion's cache invalidates on the COMMIT, not on the
+# tag graph. `git:tag:create` moves tags onto the current commit, so an entry
+# computed before the tag keeps being served at exactly the moment the answer
+# changed -- deleting every tag at HEAD does not disturb it either. The tasks
+# above force-fetch tags for this same reason; caching the result undoes it.
+#
+# `AssemblySemVer`/`AssemblySemFileVer` are .NET four-part assembly versions
+# (`0.0.1.0`). Nothing in a Rust project consumes them, and they read as a third
+# and fourth disagreeing version next to `SemVer` and `MajorMinorPatch` in the
+# emitted version JSON.
+gitversion /nocache /output json \
+  | jq -Sr 'del(.AssemblySemVer, .AssemblySemFileVer) + {MajorMinor: "\(.Major).\(.Minor)"}' \
+    2>/dev/null || echo '{}'
+'''
+
+# The exact tag name the `git:tag:*` tasks default to, so the derivation lives in
+# one place. `SemVer` rather than `MajorMinorPatch`: SemVer carries the
+# commits-since-source counter (`0.0.1-1`), which is what makes the tag name a
+# unique point in history rather than one that collides on the next commit. The
+# floating tags are derived from this string by the tasks themselves, so an
+# explicitly named tag gets the same treatment without a second gitversion call.
+# Hidden for the same reason `version:json` is -- it is plumbing.
+[tasks."version:tag"]
+alias = []
+description = "Print the exact tag name derived from version:json, e.g. v0.0.1-1"
+hide = true
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+VERSION="$(mise run version:json | jq -r '.SemVer // empty')"
+
+# Empty means version:json fell back to `{}` -- gitversion is missing or refused
+# the tree. Tagging `vnull` from that is worse than stopping.
+if [ -z "${VERSION}" ]; then
+    echo "error: version:json supplied no SemVer; is gitversion installed?" >&2
+    echo "       Name the tag explicitly, e.g. mise run git:tag:create v0.0.1-1" >&2
+    exit 1
+fi
+
+echo "v${VERSION}"
+'''
+shell = "bash -c"
+
+# The floating tag names for a version, newest-first: `v0.0.1`, `v0.0`, `v0`.
+#
+# Derived from the tag STRING, not from `version:json` fields. `MajorMinor` is
+# not something gitversion emits -- `version:json` synthesizes it in jq -- so
+# reading fields here would either duplicate that jq or depend on a key raw
+# gitversion output does not have. Splitting the tag also means an explicitly
+# named tag floats exactly like a derived one.
+[tasks."version:tags:floating"]
+alias = []
+description = "Print the floating tag names for a version, e.g. v0.0.1 v0.0 v0"
+hide = true
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+TAG="${usage_tag:-$(mise run version:tag)}"
+
+# v0.0.1-1 -> 0.0.1: drop the leading v, then the pre-release/build suffix.
+BASE="${TAG#v}"
+BASE="${BASE%%[-+]*}"
+
+IFS='.' read -r MAJOR MINOR _ <<<"${BASE}"
+MINOR="${MINOR:-0}"
+
+# A version like `0.0` yields `v0.0` twice; emit each name once.
+printf 'v%s\nv%s.%s\nv%s\n' "${BASE}" "${MAJOR}" "${MINOR}" "${MAJOR}" | awk '!seen[$0]++'
+'''
+shell = "bash -c"
+usage = 'arg "[tag]" help="tag to derive from, e.g. v0.0.1-1; defaults to the version:tag derivation"'
+
+[tasks.version]
+alias = ["semver"]
+description = "Print GitVersion's SemVer for the working tree, e.g. 0.0.1-1 (the release input; NOT what the committed files are gated against -- see version:check)"
+run = "mise run version:json | jq -r '.SemVer'"
+
+[tasks."version:sync"]
+alias = []
+description = "Write the Cargo.toml [workspace.package] version into every file that restates it; pass --check to report drift instead of writing"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Cargo.toml's [workspace.package] version is the anchor: it is what `cargo
+# publish` uploads and what crates.io enforces, and it moves only on a
+# deliberate bump. `mise run version` is deliberately NOT the anchor -- its
+# SemVer carries CommitsSinceVersionSource, so it advances on EVERY commit and a
+# gate against it could never converge: the commit that sets Cargo.toml to
+# 0.0.1-2 is itself what makes the expected value 0.0.1-3.
+#
+# Only files that CLAIM the current version are listed below. mise.toml holds
+# nine `v0.0.1-1` strings that are examples in help text ("e.g. v0.0.1-1"); a
+# repo-wide scan would rewrite those on a bump and corrupt the documentation.
+# Member crates carry `version.workspace = true` and cannot drift at all.
+anchor="$(taplo get -f Cargo.toml '.workspace.package.version')"
+checking="${usage_check:-false}"
+from_git="${usage_from_git:-false}"
+drift=0
+
+# Reads are structured (taplo, jq); writes are anchored substitutions through a
+# temp file, because taplo has no `set` and `sed -i` spells its backup argument
+# incompatibly on macOS and GNU.
+edit() {
+    local file="$1" script="$2" tmp
+    tmp="$(mktemp)"
+    sed -E "$script" "$file" >"$tmp" && mv "$tmp" "$file"
+}
+
+# True when the site disagrees. Records rather than exits, so one run reports
+# every stale site instead of stopping at the first.
+stale() {
+    local label="$1" found="$2" want="$3"
+    if [ "$found" = "$want" ]; then
+        return 1
+    fi
+    if [ "$checking" = true ]; then
+        printf 'version drift: %s has "%s", expected "%s"\n' "$label" "$found" "$want" >&2
+        drift=1
+    else
+        printf 'version: %s "%s" -> "%s"\n' "$label" "$found" "$want"
+    fi
+    return 0
+}
+
+# `--from-git` moves the anchor itself, so a release bump is computed rather
+# than hand-edited. Everything below then propagates from it exactly as before.
+#
+# `SemVer`, matching `version:tag`: the project version carries the
+# commits-since-source counter, so `0.1.0-10` and not `0.1.0`. One field feeds
+# both the files and the tag, and neither can drift from the other.
+#
+# THE COUNTER MAKES THIS SELF-REFERENTIAL, so the release commit must be an
+# AMEND. `CommitsSinceVersionSource` is the commit count -- 10 at HEAD, with
+# `git rev-list --count HEAD` agreeing exactly -- so writing `0.1.0-10` and then
+# adding a NEW commit lands that string at count 11 and the file is stale the
+# instant it is written. `git commit --amend` leaves the count alone and the
+# value stays true. The alternative is to cut the tag immediately, which resets
+# the distance to 0.
+#
+# Known consequence, accepted deliberately: everything after the hyphen makes
+# this a SemVer PRERELEASE, and `cargo install` resolves an implicit `*` that
+# never selects one, so installs need `--version 0.1.0-10` spelled out.
+if [ "$from_git" = true ]; then
+    computed="$(mise run version:json | jq -r '.SemVer // empty')"
+    if [ -z "$computed" ]; then
+        echo "version: gitversion produced no SemVer; is it installed?" >&2
+        exit 1
+    fi
+    if stale "Cargo.toml [workspace.package] version" "$anchor" "$computed"; then
+        # `^version = "` matches the [workspace.package] key alone: `rust-version`
+        # does not start the line with `version`, and the dependency entries spell
+        # it inline inside a table.
+        [ "$checking" = true ] || edit Cargo.toml \
+            "s|^(version = \")[^\"]*(\")|\1${computed}\2|"
+    fi
+    anchor="$computed"
+fi
+
+# `cargo publish` rejects a path dependency whose `version` disagrees with the
+# crate it resolves to, so these are load-bearing rather than cosmetic.
+#
+# Discovered from the dependency table rather than listed, so adding a crate to
+# the workspace does not silently leave it ungated. Selecting on `path` is what
+# makes that safe: it picks exactly the LOCAL crates, whose version must track
+# the anchor, and skips registry dependencies, whose versions are their own.
+# Globbing `crates/*` would be wrong in the other direction -- glaucus-wasm is a
+# member with no [workspace.dependencies] entry, so nothing declares a version
+# for it to disagree with.
+deps="$(taplo get -f Cargo.toml -o json '.workspace.dependencies' \
+    | jq -r 'to_entries[] | select(.value.path) | .key')"
+for dep in $deps; do
+    found="$(taplo get -f Cargo.toml ".workspace.dependencies.${dep}.version")"
+    if stale "Cargo.toml [workspace.dependencies] ${dep}" "$found" "$anchor"; then
+        [ "$checking" = true ] || edit Cargo.toml \
+            "s|^(${dep} = .*version = \")[^\"]*(\")|\1${anchor}\2|"
+    fi
+done
+
+found="$(jq -r '.version' docs/package.json)"
+if stale "docs/package.json .version" "$found" "$anchor"; then
+    [ "$checking" = true ] || edit docs/package.json \
+        "s|^(  \"version\": \")[^\"]*(\")|\1${anchor}\2|"
+fi
+
+# Markdown restates the version tag-style, with the leading `v`, so the expected
+# string differs from the anchor by that prefix.
+#
+# The `-N` suffix is OPTIONAL in the pattern. It used to be mandatory, which was
+# invisible while every version carried one; the moment `--from-git` writes a
+# release version like 0.1.0 the match fails, `found` comes back empty, the
+# `continue` below fires and the file is silently skipped -- drift that no gate
+# reports.
+# No doc in this repository restates the version yet -- docs/reference/cli.md is
+# inherited from a project that has one, and grepping a path that does not exist
+# made this task fail outright ("No such file or directory") rather than skip.
+# The `[ -e ]` guard keeps the loop correct when the list is later populated.
+for doc in docs/reference/cli.md; do
+    [ -e "$doc" ] || continue
+    found="$(grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?' "$doc" | sort -u | tr '\n' ' ')"
+    found="${found% }"
+    [ -n "$found" ] || continue
+    if stale "$doc" "$found" "v${anchor}"; then
+        [ "$checking" = true ] || edit "$doc" \
+            "s|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|v${anchor}|g"
+    fi
+done
+
+if [ "$drift" -ne 0 ]; then
+    echo "Run \`mise run version:sync\` to align them with Cargo.toml." >&2
+    exit 1
+fi
+'''
+shell = "bash -c"
+usage = '''
+flag "--check" help="report drift and exit non-zero instead of writing"
+flag "--from-git" help="move the anchor to GitVersion's SemVer first, computing the release version instead of hand-editing Cargo.toml; amend rather than adding a commit, or the counter goes stale"
+'''
+
+[tasks."version:check"]
+alias = ["version:drift"]
+description = "Drift guard: fail if any file restating the version disagrees with Cargo.toml (run by the pre-commit hook and safe to run in CI)"
+run = "mise run version:sync --check"
+
+[tasks.doc]
+alias = ["d"]
+description = "Build the API docs (private items included, no deps) to catch broken intra-doc links"
+run = "cargo doc --all-features --no-deps --document-private-items"
+
+[tasks."doc:open"]
+alias = ["do", "dh", "doc:html"]
+depends = ["doc"]
+description = "Open the API docs `doc` built in the default browser (macOS, Linux or Windows)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+page="target/doc/glaucus/index.html"
+
+# Dispatched on `uname`, not on which opener happens to be installed. Probing for
+# `open` first would be wrong on Linux, where it is an unrelated command on some
+# distributions (and absent on most), so a probe order that works on macOS
+# misfires there. $BROWSER comes first regardless: it is what headless boxes and
+# remote-SSH sessions set, and it is the only correct answer when there is no
+# local display to open anything on.
+if [ -n "${BROWSER:-}" ]; then
+    "${BROWSER}" "${page}"
+else
+    case "$(uname -s)" in
+        Darwin) open "${page}" ;;
+        Linux) xdg-open "${page}" ;;
+        # `start` is a cmd builtin rather than an executable, so it cannot be
+        # invoked directly from bash. The empty "" is the window TITLE argument,
+        # which start would otherwise take the path for. `//c` survives MSYS
+        # path mangling, which rewrites a lone `/c` into a Windows path.
+        MINGW* | MSYS* | CYGWIN*) cmd.exe //c start "" "${page}" ;;
+        *)
+            echo "doc:open: no known opener for $(uname -s). Docs are at ${page}" >&2
+            exit 1
+            ;;
+    esac
+fi
+'''
+shell = "bash -c"
+
+[tasks."cargo:lock:check"]
+alias = []
+description = "Fail if Cargo.lock is out of date relative to Cargo.toml (run `cargo update` to refresh)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Judges the INDEX, not the working tree, because the working tree is not stable
+# while the hook runs: `audit` and `deny` invoke cargo, and cargo repairs a stale
+# Cargo.lock in place. A working-tree check read a file an earlier step had
+# already fixed and passed, while the STAGED lock stayed stale and went into the
+# commit -- the exact thing this exists to stop. Materialising the index removes
+# the ordering dependency: the verdict cannot be changed by whatever else ran.
+#
+# `--locked` on a read-only command, not `cargo update --dry-run`. It fails when
+# the lock would have to change and never writes, so there is no repaired file
+# for a later step to observe. It also avoids the trap the previous version fell
+# into: `cargo update --dry-run | grep -q` closed the pipe at the first match,
+# and cargo -- Rust ignores SIGPIPE -- then died on EPIPE with 101, which
+# `pipefail` promoted to the pipeline's status, leaving the `if` false precisely
+# when the lockfile WAS stale. It could never fail.
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "cargo:lock:check: not a git repository, nothing staged to judge." >&2
+    exit 0
+fi
+
+staged="$(mktemp -d)"
+trap 'rm -rf "${staged}"' EXIT
+git checkout-index --all --prefix="${staged}/"
+
+if ! report="$(cargo metadata --locked --format-version 1 \
+    --manifest-path "${staged}/Cargo.toml" 2>&1 >/dev/null)"; then
+    echo "Cargo.lock is out of date as staged -- run 'cargo update', then stage it." >&2
+    # Rewritten to repo-relative: cargo names the scratch copy it was pointed at,
+    # and a /var/folders/... path in the message reads as a different file.
+    printf '%s\n' "${report}" | sed "s|${staged}/||g" >&2
+    exit 1
+fi
+'''
+shell = "bash -c"
+
+[tasks.yamllint]
+alias = ["yl"]
+description = "Lint YAML with yamllint-rs (Rust); pass paths (e.g. hk {staged_files}) or default to the whole repo"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "paths=(${usage_paths:-.})"
+yamllint-rs "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="Paths to lint; defaults to the whole repo when omitted"'
+
+[tasks."yamllint:fix"]
+alias = ["ylf"]
+description = "Auto-fix fixable YAML issues with yamllint-rs (Rust)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "paths=(${usage_paths:-.})"
+yamllint-rs --fix "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="Paths to fix; defaults to the whole repo when omitted"'
+
+[tasks.actionlint]
+alias = ["al"]
+description = "Lint GitHub Actions workflows with actionlint (config in .github/actionlint.yaml); pass paths (e.g. hk {staged_files}) or default to all workflows"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# actionlint auto-discovers .github/actionlint.yaml. With no paths it lints
+# every workflow under .github/workflows; forward staged paths when given.
+# Variadic args arrive shell-escaped — eval into an array so paths survive.
+eval "paths=(${usage_paths:-})"
+actionlint "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="workflow files to lint; defaults to every workflow under .github/workflows when omitted"'
+
+[tasks.markdownlint]
+alias = ["md"]
+description = "Lint Markdown with rumdl using config in .rumdl.toml"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "paths=(${usage_paths:-})"
+rumdl check "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="paths/globs to lint; uses the config globs when omitted"'
+
+[tasks."markdownlint:fix"]
+alias = ["mdf"]
+description = "Auto-fix Markdown issues (blank lines around headings/lists, etc.) with rumdl --fix"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "paths=(${usage_paths:-})"
+rumdl fmt "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="paths/globs to fix; uses the config globs when omitted"'
+
+[tasks."cargo:sort"]
+alias = ["sort"]
+description = "Sort [dependencies] tables in every Cargo.toml alphabetically with cargo-sort (writes). Run BEFORE taplo so taplo gets the final formatting pass"
+run = "cargo sort --config tomlfmt.toml --grouped --workspace"
+
+[tasks."cargo:sort:check"]
+alias = ["sortc"]
+description = "Check Cargo.toml dependency ordering without writing (the CI/pre-commit gate); fails if any [dependencies] table is unsorted"
+run = "cargo sort --config tomlfmt.toml --grouped --workspace --check"
+
+[tasks."taplo:fmt"]
+alias = ["tf"]
+description = "Format all TOML with taplo (writes; config in taplo.toml). The formatter of record for every .toml; pairs with cargo-sort, which owns Cargo.toml dependency ordering"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# taplo logs its config discovery and full file list to stderr at INFO, which hk
+# surfaces as if the step had complained. Errors and the exit code are unaffected.
+export RUST_LOG="${RUST_LOG:-error}"
+
+# taplo auto-discovers taplo.toml. With no paths it formats every .toml in the
+# repo (honouring taplo.toml's exclude); forward staged paths when given.
+eval "paths=(${usage_paths:-})"
+taplo fmt "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="paths/globs to format; defaults to every .toml (per taplo.toml) when omitted"'
+
+[tasks."taplo:check"]
+alias = ["tfc"]
+description = "Check TOML formatting without writing (the CI/pre-commit gate); prints a diff of any non-conforming file. Config in taplo.toml"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# See [tasks."taplo:fmt"]: quiet taplo's INFO tracing so only real diagnostics show.
+export RUST_LOG="${RUST_LOG:-error}"
+
+eval "paths=(${usage_paths:-})"
+taplo fmt --check --diff "${paths[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[paths]" var=#true help="paths/globs to check; defaults to every .toml when omitted"'
+
+[tasks."comply:format:check"]
+alias = []
+description = "Fail if any SPDX header is not in comply's canonical form. Read-only counterpart to `mise run comply format`; `mise run comply` only checks a header EXISTS, not its shape, so without this the canonical form silently rots"
+run = "mise run comply format --path . --check"
+
+[tasks.comply]
+alias = []
+description = "Check REUSE/SPDX license compliance with comply (defaults to `lint`); pass a subcommand, e.g. `mise run comply annotate --license MIT --holder \"Name <email>\"`"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Variadic args arrive as a shell-escaped string; eval into an array so flags
+# survive intact. Fall back to `lint` (the CI gate) when nothing is passed.
+eval "args=(${usage_args:-lint})"
+# ALWAYS build from this workspace. An installed `comply` on PATH would make the
+# gate report on whatever binary happened to be installed rather than on the code
+# being changed -- a green check for a tree that does not pass.
+comply "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="comply subcommand + flags; defaults to `lint` when omitted"'
+
+[tasks."comply:fix"]
+alias = []
+description = "Add/refresh SPDX headers on source files with `comply annotate` (the WRITE counterpart to the lint-only `comply` task). Requires explicit paths — it never blanket-annotates, since most files are covered aggregately by REUSE.toml's `**` rule"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# `comply lint` only CHECKS; this is the writer. Paths are required on purpose:
+# REUSE.toml's `**` aggregate annotation already makes every file compliant, so
+# headers are an opt-in per-file convention (used on source files), not a blanket
+# operation. Pass `--copyright` WITHOUT a year — comply prepends the current year
+# itself, so embedding one would double it ("2026 2026 …"). --merge-copyrights
+# keeps re-runs idempotent (no duplicate copyright lines).
+# `<paths>` is declared required in the usage spec below, so mise rejects an
+# empty invocation with a proper CLI error before this script ever runs.
+eval "paths=(${usage_paths:-})"
+# Never annotate symlinks — the per-crate LICENSE-APACHE/LICENSE-MIT links point
+# at the shared LICENSES/ texts, so `comply annotate` would write THROUGH the link
+# (corrupting the canonical license) or drop a `.license` sidecar. Filter them out
+# (defence-in-depth; the *.rs scope already excludes the license links).
+real=()
+for p in "${paths[@]}"; do
+    if [ -L "$p" ]; then
+        echo "comply:fix: skipping symlink $p" >&2
+    else
+        real+=("$p")
+    fi
+done
+# Joined-string test, not `${#real[@]}`: mise renders run blocks as tera
+# templates and bash's array-length syntax opens a tera comment (`{#`), failing
+# the task with "Closing comment tag `#}` not found". Paths are never empty
+# strings, so the two tests agree here.
+if [ -z "${real[*]:-}" ]; then
+    exit 0
+fi
+# Built from this workspace for the same reason as [tasks.comply]: an installed
+# binary would write headers using a different version of the tool than the one
+# under change.
+# --update-reuse-toml false is now the CLI default too; it stays spelled out
+# here so this task's behaviour is pinned regardless of any future default
+# change. The `**` aggregate in REUSE.toml already covers these files, so a
+# per-file `override` block adds nothing -- and `override` would supersede the
+# inline header written above.
+comply annotate \
+    --copyright "COMPLY contributors" \
+    --license "MIT OR Apache-2.0" \
+    --merge-copyrights \
+    --update-reuse-toml false \
+    "${real[@]}"
+# `annotate` writes header CONTENT but leaves the shape of a header that already
+# exists; only `format` canonicalises shape. Running both is what makes this task
+# agree with `comply:format:check` by construction -- annotate for files with no
+# header, format for the ones that have a non-canonical one.
+#
+# An earlier awk pass here did the opposite: it deleted the bare comment marker
+# between the copyright and licence lines. Because hk runs this task as a
+# pre-commit FIX step on every staged *.rs, each commit silently reverted the
+# canonical form, and `comply:format:check` then failed in CI on files that had
+# just been "fixed".
+# `--files` takes ONE value per occurrence, so the flag is repeated rather than
+# handed a list; `--files a.rs b.rs` makes clap reject b.rs as a stray argument.
+fmt_args=()
+for p in "${real[@]}"; do
+    fmt_args+=(--files "$p")
+done
+comply format "${fmt_args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "<paths>" var=#true help="files to annotate, e.g. crates/foo/src/lib.rs"'
+
+[tasks."comply:fix:all"]
+alias = []
+description = "Whole-project SPDX header pass: run comply:fix over EVERY tracked Rust source file. Idempotent (existing 2-line headers are left byte-identical), so it's safe to run anytime"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+files=()
+while IFS= read -r f; do files+=("$f"); done < <(git ls-files '*.rs')
+if [ -z "${files[*]:-}" ]; then
+    echo "comply:fix:all: no tracked .rs files found." >&2
+    exit 0
+fi
+mise run comply:fix "${files[@]}"
+'''
+shell = "bash -c"
+
+[tasks."cargo:audit"]
+alias = []
+description = "Audit dependencies for known security advisories (RustSec) with cargo-audit (reads .cargo/audit.toml)"
+run = "cargo audit"
+
+[tasks."cargo:deny"]
+alias = []
+description = "Check the supply-chain policy (licenses, advisories, bans, sources) with cargo-deny per deny.toml"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# cargo-deny auto-discovers deny.toml at the repo root. Default to `check`
+# (runs every check); forward args (e.g. `check licenses`) when provided.
+eval "args=(${usage_args:-check})"
+cargo deny "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-deny args; defaults to `check` (all checks) when omitted"'
+
+[tasks."coverage:sarif"]
+alias = ["cov:sarif", "sarif"]
+depends = ["coverage"]
+depends_post = []
+description = "Convert the lcov.info produced by tarpaulin into SARIF for code-scanning upload"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Same source of truth tarpaulin reads. Without it cargo-crap compares
+# every source file against the LCOV report and warns about the ones coverage
+# deliberately omits -- "2 source files had no matching entry" for main.rs and
+# build.rs, which is a configuration echo, not a finding.
+# Not `${#EXCLUDES[@]}`: `{#` opens a Tera comment in a mise run block.
+EXCLUDES=()
+while IFS= read -r glob; do
+  [ -n "$glob" ] && EXCLUDES+=(--exclude "$glob")
+done < <(RUST_LOG=error taplo get -f tarpaulin.toml 'default.exclude-files')
+
+if [ -z "${EXCLUDES[*]:-}" ]; then
+  echo "Could not read exclude-files from tarpaulin.toml" >&2
+  exit 1
+fi
+
+cargo crap --lcov lcov.info --format sarif "${EXCLUDES[@]}" > results.sarif
+'''
+shell = "bash -c"
+
+
+[tasks."docker:build"]
+alias = ["docker-build", "db", "dkr-b", "dkr:build"]
+description = "Build a Docker image using multi-stage Dockerfile with buildx"
+run = '''
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# `sed`, not `grep -oP`: BSD grep (the macOS default, and first on PATH even
+# when GNU grep is installed) has no `-P`, so both lookups failed and the `||`
+# fallbacks silently supplied literals. That tagged the image `comply:0.1.0`
+# while the workspace was at 0.0.1-1 -- a wrong version label, reported by
+# nothing.
+RUST_VERSION=$(sed -n 's/^channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' rust-toolchain.toml 2>/dev/null \
+  || sed -n 's/^rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml 2>/dev/null)
+RUST_VERSION="${RUST_VERSION:-1.97}"
+APP_VERSION=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml 2>/dev/null)
+APP_VERSION="${APP_VERSION:-0.1.0}"
+
+# Overrides the BUILD base only. The Dockerfile's runtime base
+# (`IMAGE_TAG_RUNTIME`) keeps its digest-pinned default: a single shared
+# `IMAGE_TAG` sent this rust tag to the `debian:` FROM as well and asked for
+# `debian:1.97-trixie`, which does not exist.
+IMAGE_TAG_BUILD="${RUST_VERSION}-trixie"
+DOCKER_TAG="${usage_tag:-glaucus:${APP_VERSION}}"
+DOCKERFILE="${usage_file:-docker/Dockerfile}"
+
+BUILD_ARGS=()
+eval "extra_args=(${usage_build_arg:-})"
+for arg in "${extra_args[@]}"; do
+  BUILD_ARGS+=("--build-arg" "$arg")
+done
+
+docker buildx build \
+  --pull \
+  --build-arg "IMAGE_TAG_BUILD=${IMAGE_TAG_BUILD}" \
+  "${BUILD_ARGS[@]}" \
+  -f "$DOCKERFILE" \
+  -t "$DOCKER_TAG" \
+  --progress plain \
+  .
+'''
+shell = "bash -c"
+usage = '''
+flag "-b --build-arg <build_arg>" help="Additional build arg values" var=#true
+flag "-t --tag <tag>" help="Docker image tag override"
+flag "-f --file <file>" help="Dockerfile path override" default="docker/Dockerfile"
+'''
+
+[tasks."docker:ignore:verify"]
+alias = ["div"]
+description = "Build an ephemeral Docker image with .dockerignore and verify that only the expected files land in the build context"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+if ! docker buildx version &>/dev/null; then
+    echo "dockerignore-verify: Docker buildx is not available -- skipping." >&2
+    exit 0
+fi
+
+# Create an ephemeral Dockerfile that lists every file in the build context.
+TMPFILE=$(mktemp /tmp/${PROJECT_NAME}-dockerignore-test-XXXXXXXXXX.Dockerfile)
+trap 'rm -f "$TMPFILE"' EXIT
+
+cat > "$TMPFILE" << 'DOCKERFILE'
+FROM busybox:latest
+WORKDIR /ctx
+COPY . .
+RUN find /ctx -type f | sort | tee /tmp/files.txt
+CMD ["cat", "/tmp/files.txt"]
+DOCKERFILE
+
+TAG="${PROJECT_NAME}-dockerignore-verify:latest"
+
+echo "--- Building ephemeral image (buildx + .dockerignore) ---"
+if ! docker buildx build \
+    --file "$TMPFILE" \
+    --load \
+    --tag "$TAG" \
+    --progress plain \
+    . 2>&1; then
+    echo "ERROR: docker buildx build failed." >&2
+    exit 1
+fi
+
+echo ""
+echo "--- Files in build context (after .dockerignore) ---"
+CONTEXT_FILES=$(docker run --rm "$TAG" 2>&1)
+echo "$CONTEXT_FILES"
+
+echo ""
+echo "--- Verifying .dockerignore ---"
+
+# Expected: essential build files MUST be present
+for f in "Cargo.toml" "Cargo.lock" "crates/glaucus/build.rs" "rust-toolchain.toml"; do
+    if echo "$CONTEXT_FILES" | grep -q "/ctx/$f"; then
+        echo "  [ok]   $f present"
+    else
+        echo "  [FAIL] $f MISSING from build context!"
+        FAIL=1
+    fi
+done
+
+# Check that key directories exist
+for d in "crates/glaucus/src/lib.rs" "crates/glaucus/src/main.rs" ".cargo/config.toml"; do
+    if echo "$CONTEXT_FILES" | grep -q "/ctx/$d"; then
+        echo "  [ok]   $d present"
+    else
+        echo "  [FAIL] $d MISSING from build context!"
+        FAIL=1
+    fi
+done
+
+# `.git` is DELIBERATELY not in this list: `.dockerignore` stopped excluding it
+# so `crates/glaucus/build.rs` can stamp a real `GIT_COMMIT` instead of
+# `unknown` (see `.dockerignore`'s own comment for the full reasoning). It is
+# checked as a REQUIRED-present path instead, right below.
+if echo "$CONTEXT_FILES" | grep -q "/ctx/.git/HEAD"; then
+    echo "  [ok]   .git present (needed for GIT_COMMIT provenance)"
+else
+    echo "  [FAIL] .git MISSING from build context -- GIT_COMMIT will report 'unknown'!"
+    FAIL=1
+fi
+
+# Excluded directories: these MUST be absent from context root
+for pat in "target" "docs" "scripts" "tests" "worktrees" ".DS_Store" "__pycache__" ".idea" ".vscode"; do
+    if echo "$CONTEXT_FILES" | grep -Eq "^/ctx/$pat(/|$)"; then
+        echo "  [FAIL] $pat should have been EXCLUDED by .dockerignore!"
+        FAIL=1
+    else
+        echo "  [ok]   $pat excluded"
+    fi
+done
+
+# Root-level excluded files
+for f in "AGENTS.md" "context.md" "CHANGELOG.md" "deny.toml" "hk.pkl" "cobertura.xml" "lcov.info" "results.sarif" "REUSE.toml" "mise.toml" "rustfmt.toml" ".clippy.toml"; do
+    if echo "$CONTEXT_FILES" | grep -Eq "^/ctx/$f$"; then
+        echo "  [FAIL] $f should have been EXCLUDED by .dockerignore!"
+        FAIL=1
+    else
+        echo "  [ok]   $f excluded"
+    fi
+done
+
+# Subdirectory .md files: **/*.md must exclude things like crates/*/README.md
+if echo "$CONTEXT_FILES" | grep -Eq "^/ctx/crates/[^/]+/README\.md$"; then
+    echo "  [FAIL] crates/*/README.md should have been EXCLUDED by **/*.md!"
+    FAIL=1
+else
+    echo "  [ok]   crates/*/README.md excluded via **/*.md"
+fi
+
+echo ""
+if [ -n "${FAIL:-}" ]; then
+    echo "FAIL: .dockerignore verification failed."
+    docker image rm "$TAG" > /dev/null 2>&1 || true
+    exit 1
+fi
+
+echo "PASS: .dockerignore is correctly filtering the build context."
+docker image rm "$TAG" > /dev/null 2>&1 || true
+'''
+shell = "bash -c"
+
+[tasks."test"]
+alias = ["t", "test"]
+depends = []
+depends_post = []
+description = "Run the test suite under cargo-tarpaulin. Engine, outputs and ignores live in tarpaulin.toml — the single source of truth. Extra args after `--` pass through to tarpaulin."
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Expanded with the `+` form, not a length test: an array-length expansion
+# opens a Tera comment in a mise run block and fails to render. A bare
+# "${args[@]}" is also an unbound-variable error under `set -u` when empty.
+eval "args=(${usage_args:-})"
+# `--features glaucus/cli` is load-bearing, not decoration: the `cli` feature is
+# NOT in glaucus's default set, so without this tarpaulin never compiles
+# crates/glaucus/src/cli/ and the 100% gate passes while measuring zero lines of
+# it. Package-qualified because `--workspace` spans several packages.
+cargo tarpaulin --workspace --engine llvm \
+  --features glaucus/cli \
+  --run-types Tests --run-types Doctests \
+  --fail-under "${usage_threshold?}" \
+  ${args[@]+"${args[@]}"}
+'''
+shell = "bash -c"
+usage = '''
+flag "-t --threshold <threshold>" help="Coverage threshold" default="100" env="RUST_COVERAGE_THRESHOLD"
+arg "[args]" var=#true help="Extra arguments forwarded to cargo-tarpaulin (e.g. --out Html)"
+'''
+
+[tasks.coverage]
+alias = ["cov", "coverage:tarpaulin", "tarpaulin"]
+depends = []
+depends_post = []
+description = "Measure production-code coverage with cargo-tarpaulin. All options (engine, outputs, ignores) live in tarpaulin.toml — the single source of truth — so this is a bare invocation."
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+mise run test --threshold "${usage_threshold?}"
+'''
+shell = "bash -c"
+usage = '''
+flag "-t --threshold <threshold>" help="Coverage threshold" default="100" env="RUST_COVERAGE_THRESHOLD"
+'''
+
+[tasks.codecov]
+alias = []
+depends = ["coverage"]
+depends_post = []
+description = "Generate fresh coverage (./cobertura.xml) then upload it to Codecov. Thin wrapper: runs the coverage task, then delegates to codecov:upload so the codecovcli invocation lives in exactly one place (DRY)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Delegate to codecov:upload (the single source of the codecovcli command),
+# forwarding any extra args straight through.
+eval "extra=(${usage_args:-})"
+if [ -n "${usage_args:-}" ]; then
+    mise run codecov:upload -- "${extra[@]}"
+else
+    mise run codecov:upload
+fi
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="extra args forwarded through codecov:upload to codecovcli upload-coverage"'
+
+[tasks."codecov:upload"]
+alias = []
+description = "Upload an EXISTING ./cobertura.xml to Codecov WITHOUT regenerating it — retry a failed upload, or run after a manual `mise run coverage`. Requires CODECOV_TOKEN (repo upload token) and the repo activated on Codecov"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Codecov requires a token even for local uploads; fail with a clear hint.
+: "${CODECOV_TOKEN:?set CODECOV_TOKEN (the repo upload token) before running}"
+eval "extra=(${usage_args:-})"
+# Derive owner/repo from the origin remote (handles SSH and HTTPS forms) and pass
+# --slug/--git-service explicitly. Auto-detection breaks for local runs and for
+# org-level tokens — both surface as Codecov's "Repository not found". (That error
+# ALSO means the repo isn't activated on Codecov yet: install the Codecov GitHub
+# app on it / add it at app.codecov.io. No CLI flag can fix an un-synced repo.)
+slug="${CODECOV_SLUG:-$(git config --get remote.origin.url \
+    | awk -F'[/:]' '{print $(NF-1)"/"$NF}' | sed 's/\.git$//')}"
+# upload-coverage is the one-shot create-commit + create-report + upload.
+# --sha is required by it; we pass it (and the branch) explicitly so a local run
+# never depends on auto-detection. --disable-search uploads ONLY the explicit
+# --file (Cobertura) instead of also sweeping up tarpaulin's coverage.json, and
+# --plugin noop skips the gcov/pycoverage/swift gatherers (this is Rust, so they
+# only emit "No <x> data found" warnings).
+# --fail-on-error turns a rejected upload into a non-zero exit.
+#
+# No `--token "$CODECOV_TOKEN"`. codecovcli reads CODECOV_TOKEN from the
+# environment, and passing it as a flag put a live credential in argv, which is
+# world-readable through `ps` for as long as the upload runs.
+if ! codecovcli upload-coverage \
+    --fail-on-error \
+    --git-service github \
+    --slug "$slug" \
+    --sha "$(git rev-parse HEAD)" \
+    --branch "$(git rev-parse --abbrev-ref HEAD)" \
+    --file cobertura.xml \
+    --disable-search \
+    --plugin noop \
+    --flag tarpaulin \
+    "${extra[@]}"; then
+    owner="$(printf '%s' "$slug" | cut -d/ -f1)"
+    {
+        echo ""
+        echo "codecov upload failed. If the message was \"Repository not found\","
+        echo "Codecov does not have $slug yet — no CLI flag can fix that. One-time setup:"
+        echo "  1. Install/configure the Codecov GitHub App and grant it access to"
+        echo "     $slug (the repo is INTERNAL, so the app needs explicit permission)."
+        echo "  2. Activate the repo at https://app.codecov.io/gh/$owner"
+        echo "  3. Copy that repo's upload token into CODECOV_TOKEN."
+        echo "  4. Push this branch so the uploaded commit exists on the remote."
+    } >&2
+    exit 1
+fi
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="extra args forwarded to `codecovcli upload-coverage`"'
+
+[tasks.bench]
+alias = []
+description = "Run Criterion benchmarks through cargo-criterion (richer reports than `cargo bench`); benches read Criterion.toml"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "args=(${usage_args:-})"
+cargo criterion "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-criterion args, e.g. --bench <name>; runs all benches when omitted"'
+
+[tasks.flame]
+alias = []
+description = "Profile a target with cargo-flamegraph → flamegraph.svg. macOS needs sudo/dtrace (SIP); pass a target, e.g. `mise run flame --bench parser`"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# flamegraph needs an explicit target (and dtrace/sudo on macOS); with none there
+# is nothing to profile, so print guidance and skip cleanly.
+if [ -z "${usage_args:-}" ]; then
+    echo "flame: nothing to profile — pass a target, e.g. mise run flame -- --bench parser" >&2
+    exit 0
+fi
+eval "args=(${usage_args:-})"
+# Build with the `profiling` profile (release codegen + line-table symbols, not
+# stripped) so the flamegraph can attribute samples to source. Without this,
+# cargo-flamegraph's default `--release` build is stripped and shows raw addresses.
+cargo flamegraph --profile profiling "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-flamegraph args, e.g. --bench <name> or --bin <name>"'
+
+[tasks.pgo]
+alias = []
+description = "Profile-Guided Optimization with cargo-pgo (Rust Performance Book: ~10%+ on real workloads). Two-pass: `pgo build` (instrument) → run representative inputs → `pgo optimize`. Uses llvm-tools (in rust-toolchain). NOT usable for crates.io-published binaries; meaningful only once the binaries have real workloads"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Passthrough to cargo-pgo. Default to `info` (prints the toolchain/PGO env) so a
+# bare `mise run pgo` is non-destructive. The instrument→profile→optimize cycle
+# is run explicitly via subcommands.
+eval "args=(${usage_args:-info})"
+cargo pgo "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-pgo args, e.g. build / run / optimize / bench; prints the PGO/BOLT environment when omitted"'
+
+[tasks.fuzz]
+alias = []
+description = "Run a libFuzzer target via cargo-fuzz. REQUIRES a nightly toolchain (sanitizer -Z flags) — the project's stable 1.95 channel cannot build fuzz targets; run `rustup toolchain install nightly` first. e.g. `mise run fuzz run <target>`"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# No fuzz/ directory yet means there are no targets to build or run, so skip
+# cleanly. Once targets exist, cargo-fuzz needs a nightly toolchain (ASan/-Z
+# flags) — the project channel stays stable — so it runs via `cargo +nightly`.
+if [ ! -d fuzz ]; then
+    echo "fuzz: skipping — no fuzz/ directory (no targets yet)." >&2
+    exit 0
+fi
+eval "args=(${usage_args:-list})"
+cargo +nightly fuzz "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-fuzz args; defaults to `list` when omitted"'
+
+[tasks."cargo:mutants"]
+alias = []
+description = "Mutation-test with cargo-mutants — verifies the tests actually catch regressions (coverage != effectiveness). Slow; scope with `--file <path>` or run in CI"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "args=(${usage_args:-})"
+cargo mutants "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-mutants args, e.g. --file crates/comply-core/src/lib.rs; whole tree when omitted"'
+
+[tasks."cargo:machete"]
+alias = []
+description = "Find unused dependencies with cargo-machete (enforces the minimal-deps goal); append `--fix` to strip them from Cargo.toml"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+eval "args=(${usage_args:-})"
+cargo machete --with-metadata "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-machete args; scans the whole workspace when omitted"'
+
+[tasks.wizard]
+alias = []
+description = "Tune Cargo build profiles with cargo-wizard — interactive TUI by default, or `apply <template> <profile>` / `inspect`. Templates: fast-runtime, fast-compile, min-size (the [profile.*] settings in Cargo.toml)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Passthrough to cargo-wizard. With no args it opens the interactive profile
+# dialog; forward subcommands like `apply min-size release` or `inspect`.
+eval "args=(${usage_args:-})"
+cargo wizard "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-wizard args; launches the interactive dialog when omitted"'
+
+[tasks."cargo:semver"]
+alias = []
+description = "Detect breaking public-API changes with cargo-semver-checks before a release. Needs a baseline (a published version or `--baseline-rev <git-ref>`); will be a no-op until the first crates.io publish"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Pre-release (workspace version 0.0.0) has no published baseline for
+# check-release to compare against, so skip until the first version is cut.
+# (cargo-semver-checks also needs rustc >= 1.91 to read rustdoc JSON; revisit
+# the pin vs. MSRV at release time.)
+if grep -q 'version = "0.0.0"' Cargo.toml; then
+    echo "semver-checks: skipping — pre-release 0.0.0, no published baseline." >&2
+    exit 0
+fi
+eval "args=(${usage_args:-check-release})"
+cargo semver-checks "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="cargo-semver-checks args; defaults to `check-release`"'
+
+[tasks.gitleaks]
+alias = ["gl"]
+description = "Scan for hard-coded secrets with gitleaks (defaults to a working-tree scan); pass a subcommand, e.g. `mise run gitleaks git --staged`"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# gitleaks auto-discovers .gitleaks.toml at the repo root. Default to scanning
+# the working tree; forward any args (e.g. `git --staged`) when provided.
+eval "args=(${usage_args:-dir .})"
+gitleaks "${args[@]}" --no-banner
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="gitleaks args; defaults to `dir .` when omitted"'
+
+[tasks."commit:config"]
+alias = ["cc"]
+description = "Regenerate committed.toml, cliff.toml parsers, and .gitmessage from commit-types.toml (the single source of truth for conventional-commit types)"
+run = "python3 scripts/commit-config.py generate"
+
+[tasks."commit:config:check"]
+alias = ["ccc"]
+description = "Drift guard: fail if any generated commit-config file is stale vs commit-types.toml (run by the pre-commit hook and safe to run in CI)"
+run = "python3 scripts/commit-config.py check"
+
+[tasks."commit:lint"]
+alias = ["clint"]
+description = "Lint commit message(s) with committed against committed.toml; pass `--commit-file <path>` (commit-msg hook) or a commit/range, defaults to HEAD"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Variadic args arrive as a shell-escaped string; eval into an array so a path
+# with spaces survives. Default to linting HEAD when nothing is passed.
+eval "args=(${usage_args:-HEAD})"
+committed "${args[@]}"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="committed args; defaults to HEAD when omitted"'
+
+[tasks.changelog]
+alias = []
+description = "Regenerate the full CHANGELOG.md from the commit history"
+run = "git cliff --output CHANGELOG.md"
+
+[tasks."changelog:preview"]
+alias = []
+description = "Print unreleased changelog entries (since the last tag) to stdout"
+run = "git cliff --unreleased"
+
+[tasks."changelog:bump"]
+alias = []
+description = "Bump to the next version inferred from commits and write CHANGELOG.md"
+run = "git cliff --bump --output CHANGELOG.md"
+
+[tasks."changelog:release"]
+alias = []
+description = "Generate CHANGELOG.md for an explicit tag, e.g. `mise run changelog:release v0.2.0`"
+run = "git cliff --tag {{arg(name='tag')}} --output CHANGELOG.md"
+
+# The whole bump in one place: compute the next version, write it everywhere,
+# and render the changelog under that heading.
+#
+# GitVersion is the sole authority, and `changelog:bump` above is NOT an
+# alternative to this task. `git cliff --bump` runs its own conventional-commit
+# inference, and on this history the two disagree outright: cliff reads the
+# `v0.0.1-1` prerelease tag and advances its prerelease counter to `v0.0.1-1.1`,
+# missing the `feat:` minor bump that GitVersion resolves to `0.1.0`. Since
+# GitVersion is what `.github/workflows/version.yml` and `publish.yml` act on,
+# a cliff-inferred version would put a changelog heading and a git tag under a
+# number the release pipeline never produces.
+#
+# Neither commits nor tags. `version:tag` cuts the tag, and the commit needs the
+# per-action approval every commit here needs.
+[tasks."release:prepare"]
+alias = ["rp"]
+description = "Compute the next version from GitVersion, write it into every file that restates it, and regenerate CHANGELOG.md under that heading. --check previews without writing"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+checking="${usage_check:-false}"
+
+version="$(mise run version:json | jq -r '.SemVer // empty')"
+if [ -z "$version" ]; then
+    echo "release:prepare: gitversion produced no SemVer; is it installed?" >&2
+    exit 1
+fi
+
+if [ "$checking" = true ]; then
+    printf 'next version: %s (currently %s)\n\n' \
+        "$version" "$(taplo get -f Cargo.toml '.workspace.package.version')"
+    # Drift is the EXPECTED state in a preview, so the non-zero exit must not
+    # stop the changelog below, and neither mise's "ERROR task failed" nor the
+    # "run version:sync" hint belongs here -- the command to run is this one.
+    mise run version:sync --from-git --check 2>&1 \
+        | grep -vE 'ERROR task failed|Run .mise run version:sync' || true
+    printf '\n--- CHANGELOG.md entries for v%s ---\n' "$version"
+    git cliff --unreleased --tag "v${version}"
+    exit 0
+fi
+
+mise run version:sync --from-git
+git cliff --tag "v${version}" --output CHANGELOG.md
+printf 'release prepared: v%s -- review CHANGELOG.md, then `git commit --amend` (a NEW commit invalidates the counter) and tag\n' "$version"
+'''
+shell = "bash -c"
+usage = 'flag "--check" help="preview the computed version and changelog entries without writing"'
+
+# -- crates.io registry state --
+
+# Answers "has this NAME been taken", which is a different question from "is
+# this VERSION taken" and the one that actually gates a publish. This lived in
+# .github/scripts/crates-io-index.sh; it is here because mise.toml is the single
+# source of truth for this project's tasks, and a workflow-only script could not
+# be run locally before pushing a release.
+#
+# EVERYTHING HERE FAILS CLOSED. The earlier script ran `curl -sSf ... || true`,
+# which collapsed 404, 500, DNS failure and timeout into the same empty output --
+# so a network blip was indistinguishable from "this name is free". Only a
+# definitive 404 means "not published"; any other non-200 stops the caller.
+#
+# TERA, NOT BASH, PARSES THIS FIRST. mise renders `run` as a Tera template, and
+# `{#` opens a Tera comment -- so `${#array[@]}` fails at render time with
+# "Closing comment tag `#}` not found" before bash ever sees it. That is why
+# every count below is an explicit counter variable rather than an array length.
+[tasks."crates:status"]
+alias = ["cs", "crates:check"]
+description = "Classify every publishable workspace crate on crates.io (absent / exists / version-taken) and verify ownership. Fails closed on any inconclusive lookup; prints a trailing bootstrap_needed=<bool> line for CI to consume"
+dir = "{{ config_root }}"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Defaults to the MANIFEST version, because that is the version cargo will
+# actually upload -- `cargo publish` reads Cargo.toml and ignores whatever a
+# release pipeline computed. GitVersion and Cargo.toml drift routinely (CI warns
+# "Cargo.toml declares X but this run resolved Y"), and checking the resolved
+# version while cargo uploads the manifest one asks about a release that does not
+# exist: every crate reads "available", then cargo fails on the duplicates.
+version="${usage_version:-$(cargo metadata --no-deps --format-version 1 \
+    | jq -r '[.packages[] | select(.publish != []) | .version] | first // empty')}"
+: "${version:?could not determine a version to check}"
+verify="${usage_verify:-false}"
+owner="${usage_owner:-$(git config --get remote.origin.url | sed -E 's#.*[:/]([^/]+)/[^/]+$#\1#')}"
+
+ua="glaucus-publish-workflow (+https://github.com/${owner}/glaucus)"
+body="$(mktemp)"
+trap 'rm -f "$body"' EXIT
+
+# Writes the response body to $body and prints the HTTP status. `|| code=000`
+# REASSIGNS on transport failure rather than appending to curl's own "000"
+# output, which would otherwise produce a garbled "HTTP 000000".
+#
+# --retry-all-errors is what makes retrying useful: without it curl retries only
+# transient transport errors, not the 5xx crates.io returns while shedding load.
+probe() {
+    local code
+    code="$(curl -sL --retry 3 --retry-delay 2 --retry-all-errors --max-time 30 \
+        -H "User-Agent: $ua" -o "$body" -w '%{http_code}' "$1")" || code=000
+    printf '%s' "$code"
+}
+
+# crates.io shards the index by name length: 1/a, 2/ab, 3/a/abc, then ab/cd/abcd.
+#
+# The length comes from `wc -c`, not from the obvious parameter expansion: that
+# spelling opens with the brace-hash pair Tera reads as a comment, and would fail
+# this task at render time. See the note above the task.
+index_url() {
+    local name="$1" path len
+    len="$(printf '%s' "$name" | wc -c | tr -d ' ')"
+    case "$len" in
+    1) path="1/$name" ;;
+    2) path="2/$name" ;;
+    3) path="3/${name:0:1}/$name" ;;
+    *) path="${name:0:2}/${name:2:2}/$name" ;;
+    esac
+    printf 'https://index.crates.io/%s' "$path"
+}
+
+# `publish` is null for publishable crates and [] for `publish = false`, so this
+# never sends a dev-only harness to the registry.
+members="$(cargo metadata --no-deps --format-version 1 \
+    | jq -r '.packages[] | select(.publish != []) | .name' | sort)"
+
+absent=""
+taken=""
+foreign=""
+pending=""
+todo=""
+n_absent=0
+n_taken=0
+n_foreign=0
+n_pending=0
+n_todo=0
+n_total=0
+
+for crate in $members; do
+    n_total=$((n_total + 1))
+
+    code="$(probe "$(index_url "$crate")")"
+
+    case "$code" in
+    404) state=absent ;;
+    200)
+        if jq -r '.vers' <"$body" | grep -Fxq "$version"; then
+            state=version-taken
+        else
+            state=exists
+        fi
+        ;;
+    *)
+        echo "error: crates.io index returned HTTP $code for '$crate'" >&2
+        echo "       cannot confirm publish state; refusing to guess" >&2
+        exit 1
+        ;;
+    esac
+
+    # Post-publish mode asks the opposite question: everything should now be
+    # present at this version, and anything missing is merely not indexed yet.
+    if [ "$verify" = true ]; then
+        if [ "$state" = version-taken ]; then
+            echo "  OK      $crate $version -- https://crates.io/crates/$crate/$version"
+        else
+            pending="$pending $crate"
+            n_pending=$((n_pending + 1))
+            echo "  PENDING $crate $version not indexed yet"
+        fi
+        continue
+    fi
+
+    case "$state" in
+    absent)
+        absent="$absent $crate"
+        todo="$todo $crate"
+        n_absent=$((n_absent + 1))
+        n_todo=$((n_todo + 1))
+        echo "  NEW     $crate does not exist on crates.io -- needs a first publish"
+        ;;
+    version-taken)
+        taken="$taken $crate"
+        n_taken=$((n_taken + 1))
+        echo "  DONE    $crate $version already published"
+        ;;
+    exists)
+        # The name resolves, so ownership decides whether it is ours to publish
+        # to. A name held by another account is a hard stop: no token we hold can
+        # upload to it. Teams appear in the same array as users, so a crate owned
+        # only by a GitHub team is still matched.
+        code="$(probe "https://crates.io/api/v1/crates/$crate/owners")"
+        if [ "$code" != 200 ]; then
+            echo "error: crates.io owners returned HTTP $code for '$crate'" >&2
+            exit 1
+        fi
+        owners="$(jq -r '(.users // [])[].login' <"$body" | sort -u)"
+
+        if printf '%s\n' "$owners" | grep -Fxqi "$owner"; then
+            todo="$todo $crate"
+            n_todo=$((n_todo + 1))
+            echo "  OK      $crate $version available (owned by $owner)"
+        else
+            foreign="$foreign $crate"
+            n_foreign=$((n_foreign + 1))
+            echo "  FOREIGN $crate is owned by: $(printf '%s' "$owners" | tr '\n' ' ')"
+        fi
+        ;;
+    esac
+done
+
+if [ "$n_total" -eq 0 ]; then
+    echo "error: no publishable crates found" >&2
+    exit 1
+fi
+
+if [ "$verify" = true ]; then
+    if [ "$n_pending" -gt 0 ]; then
+        echo "not yet indexed (usually transient):$pending"
+    fi
+    exit 0
+fi
+
+if [ "$n_foreign" -gt 0 ]; then
+    echo "error: these crate names belong to another account:$foreign" >&2
+    echo "       rename the crate or request ownership" >&2
+    exit 1
+fi
+
+# A PARTIAL claim is resumable, not an error. crates.io rate-limits brand-new
+# crates to a burst of 5 and then one per 10 minutes, so a workspace with more
+# new names than that CANNOT land in a single `cargo publish` -- the run stops
+# mid-way with a 429 and leaves some names claimed and some not. Treating any
+# already-published version as fatal made that state unrecoverable: the retry
+# refused to start precisely because the first attempt had partly succeeded.
+#
+# Uploads are immutable, so re-publishing a taken version is impossible anyway;
+# excluding those crates and publishing the rest is the only move, and it is what
+# `todo` carries. When `todo` is empty the release is simply complete, which
+# keeps re-running this idempotent.
+echo "taken=$(printf '%s' "$taken" | sed 's/^ //')"
+echo "todo=$(printf '%s' "$todo" | sed 's/^ //')"
+
+if [ "$n_todo" -eq 0 ]; then
+    echo "nothing to publish: all $n_total crate(s) already at $version"
+    echo "bootstrap_needed=false"
+    exit 0
+fi
+
+if [ "$n_taken" -gt 0 ]; then
+    echo "resuming a partial publish: $n_taken of $n_total already at $version"
+fi
+
+# The trailing verdict, consumed by publish.yml to choose an auth method. A crate
+# that does not exist yet CANNOT have a Trusted Publishing config -- crates.io
+# requires the crate to exist before one can be created -- so OIDC cannot mint a
+# usable token for it and the first publish has to carry a real account token.
+if [ "$n_absent" -gt 0 ]; then
+    echo "first publish needed for:$absent"
+    echo "bootstrap_needed=true"
+else
+    echo "bootstrap_needed=false"
+fi
+'''
+shell = "bash -c"
+usage = '''
+flag "--version <version>" help="version to check (default: the workspace manifest version, which is what cargo publish uploads)"
+flag "--verify" help="post-publish mode: confirm every crate is indexed at this version instead of gating on availability"
+flag "--owner <owner>" help="expected crates.io owner login (default: the GitHub owner in remote.origin.url)"
+'''
+
+# `publish = false` gates `cargo publish` and NOTHING else. `cargo package` is a
+# local build-verification command with no registry semantics, so
+# `cargo package --workspace` happily packages the dev-only crates -- verified:
+# a two-member sandbox where one member sets `publish = false` still reports
+# "Packaging b v0.1.0", while `cargo publish --workspace --dry-run` skips it.
+#
+# That difference is not academic here. publish.yml packages the workspace and
+# then does `cp target/package/*.crate dist/`, and dist/ is hashed, SLSA-attested,
+# cosign-signed and uploaded to the GitHub release -- so the harnesses would be
+# signed release artefacts. glaucus-yaml-test-suite alone contributes ~9.2k
+# conformance fixtures (322K), which also made the "Package contains N files"
+# size check meaningless.
+#
+# The set is DERIVED rather than spelled out because a hardcoded list in the
+# workflow silently stops covering a fourth dev-only crate. It lives here, not in
+# publish.yml, for the reason stated above `crates:status` in that file: a human
+# must be able to run the exact release-time logic before cutting a release.
+#
+# NOT the same lever as `[workspace] exclude`. That controls MEMBERSHIP, and
+# these three inherit `.workspace = true` fields, which an excluded package
+# cannot resolve ("failed to find a workspace root"); pointing at the root with
+# `package.workspace` fails too ("current package believes it's in a workspace
+# when it's not"). Excluding them breaks `cargo bench -p glaucus-bench` and the
+# manifests themselves, and buys nothing publish = false does not already give.
+[tasks."crates:dev-only"]
+alias = ["cdo", "crates:unpublished"]
+description = "List workspace crates marked `publish = false` (bench, fuzz, conformance suite). `cargo package --workspace` ignores that flag, so release tooling must subtract this set explicitly; --flags emits ready-to-use --exclude arguments"
+dir = "{{ config_root }}"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+verbose="${usage_verbose:-false}"
+as_flags="${usage_flags:-false}"
+
+# `publish` is the same tri-state `crates:status` keys off, read the other way
+# round: null = publishable anywhere, [] = `publish = false`, ["name"] = allowed
+# on specific registries only. The comparison is explicit because [] is TRUTHY in
+# jq -- `select(.publish)` would match every crate and select nothing useful.
+names="$(cargo metadata --no-deps --format-version 1 \
+    | jq -r '.packages[] | select(.publish == []) | .name' | sort)"
+
+# `grep -c .` rather than a parameter expansion: the obvious spelling for an
+# array length opens with the brace-hash pair Tera parses as a comment and would
+# fail this task at render time. See the note above `crates:status`.
+count="$(printf '%s' "$names" | grep -c . || true)"
+
+if [ "$verbose" = "true" ]; then
+    echo "crates:dev-only: $count crate(s) marked publish = false" >&2
+fi
+
+# An empty set is a DEFECT, not "nothing to exclude". It is reachable two ways
+# and both are bad: a harness lost its `publish = false` (that crate is now
+# publishable and the next tag would upload it), or this query stopped matching
+# cargo's metadata schema. Returning success with an empty list restores exactly
+# the behaviour the task exists to prevent -- callers would package the whole
+# workspace and cosign-sign the harnesses into the release -- and it would do so
+# silently, at a tag, which is the worst moment to find out.
+#
+# Same posture `crates:status` already takes: refuse to guess on an inconclusive
+# lookup. There is deliberately NO --allow-empty escape hatch. If this workspace
+# genuinely has no dev-only crates left, the fix is to delete this task and its
+# two call sites in publish.yml -- the subtraction they perform is then a no-op,
+# and a flag would only preserve dead machinery.
+if [ "$count" -eq 0 ]; then
+    {
+        echo 'crates:dev-only: no workspace crate declares publish = false -- refusing to continue.'
+        echo '  Expected at least glaucus-bench, glaucus-fuzz and glaucus-yaml-test-suite.'
+        echo '  Either a harness lost its publish = false key, or this query no longer'
+        echo "  matches cargo's metadata schema. Inspect the raw values with:"
+        echo '    cargo metadata --no-deps --format-version 1 | jq ".packages[] | [.name, .publish]"'
+    } >&2
+    exit 1
+fi
+
+if [ "$as_flags" = "true" ]; then
+    # One line of `--exclude <name>` pairs, for `read -ra` in publish.yml. Safe
+    # to word-split on: cargo restricts crate names to alphanumerics, `-` and `_`.
+    printf '%s' "$names" | sed 's/^/--exclude /' | tr '\n' ' '
+    echo
+elif [ -n "$names" ]; then
+    printf '%s\n' "$names"
+fi
+'''
+shell = "bash -c"
+usage = '''
+flag "--flags" help="emit a single line of `--exclude <name>` arguments for cargo, instead of one bare name per line"
+flag "--verbose" help="report the resolved crate count on stderr before printing"
+'''
+
+# -- comply (REUSE checker) --
+
+# Not in [tools]: a git-source install cannot be served by cargo-binstall, so
+# mise rebuilt it from source in every job. See the note in [tools] above.
+# CI installs it in .github/actions/setup-rust-env; this is the local equivalent.
+[tasks."comply:install"]
+description = "Install the comply CLI from git (published only as prereleases, and its releases carry no binary assets)"
+run = '''
+cargo install --locked \
+  --git https://github.com/elioseverojunior/comply \
+  comply
+'''
+
+# -- Ignore file (gitignore-as-code) --
+
+[tasks."ignorefile:install"]
+alias = ["ignore:install"]
+description = "Install the ignorefile CLI, LSP and MCP binaries from git (not on crates.io yet, so [tools] cannot pin them)"
+run = '''
+cargo install --git https://github.com/elioseverojunior/ignorefile \
+  ignorefile-cli ignorefile-lsp ignorefile-mcp
+'''
+
+
+# `.gitignore` is generated from `ignorefile.toml`; the TOML is the source and
+# the dotfile is the artifact. Editing the artifact is silently undone by the
+# next `generate`, and editing the source without regenerating leaves the two
+# disagreeing -- which happened: `/.playwright-mcp/` in the source had become
+# two timestamped filenames that only ever matched one machine's run.
+
+[tasks."gitignore:generate"]
+alias = ["ignore:generate", "ignoregen"]
+description = "Rewrite .gitignore from ignorefile.toml (the source of truth)"
+run = "ignorefile generate"
+
+[tasks."gitignore:check"]
+alias = ["ignore:drift"]
+description = "Drift guard: fail if .gitignore is stale vs ignorefile.toml (run by the pre-commit hook and safe to run in CI)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+ignorefile validate
+
+# `generate` only writes in place, so the check is "does writing change
+# anything". Compared byte-for-byte against a copy rather than with `git diff`,
+# which answers a different question -- it compares against the index, so a
+# staged-but-uncommitted .gitignore would read as drift when it is not.
+committed="$(mktemp)"
+generated="$(mktemp)"
+trap 'rm -f "$committed" "$generated"' EXIT
+
+cp .gitignore "$committed"
+ignorefile generate >/dev/null
+cp .gitignore "$generated"
+
+# Restored unconditionally: `check` must never leave behind the change it is
+# reporting, or it becomes indistinguishable from `generate`.
+cp "$committed" .gitignore
+
+if ! cmp -s "$committed" "$generated"; then
+  echo "error: .gitignore is stale. Run \`mise run gitignore:generate\`." >&2
+  diff -u --label .gitignore --label .gitignore.expected \
+    "$committed" "$generated" >&2 || true
+  exit 1
+fi
+'''
+shell = "bash -c"
+
+# -- Setup / diagnostics --
+
+[tasks."rustup:nightly"]
+alias = []
+description = "Install the nightly toolchain + rust-src (required by cargo-fuzz). The project channel stays stable per rust-toolchain.toml"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+toolchain="${NIGHTLY_TOOLCHAIN:-nightly}"
+rustup toolchain install "$toolchain"
+'''
+shell = "bash -c"
+
+[tasks.doctor]
+alias = ["dr"]
+description = "Diagnose the toolchain, EVERY mise-provisioned tool (one row per [tools] entry), and project state. Reports MISSING for anything not installed (run `mise install`)"
+# A pure report — silence mise's `[doctor] $ <first script line>` command echo so
+# the output is just the diagnostic table, not the helper-comment preview.
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# `v <label> <cmd...>` prints the first line of the tool's version output, or
+# MISSING when it is absent (empty stdout). Keeps this in lockstep with [tools] —
+# every pinned tool gets exactly one row below.
+v() {
+    label="$1"
+    shift
+    out="$("$@" 2>/dev/null | head -1)"
+    printf "  %-20s : %s\n" "$label" "${out:-MISSING}"
+}
+
+echo "=== Platform: $(uname -s) ($(uname -m)) ==="
+
+echo "-- Rust toolchain (rust-toolchain.toml) --"
+v rustc rustc --version
+v cargo cargo --version
+v rustup rustup --version
+v rustfmt rustfmt --version
+v clippy cargo clippy --version
+
+echo "-- Cargo tools (mise [tools]) --"
+v cargo-audit cargo audit --version
+v cargo-criterion cargo criterion --version
+v cargo-deny cargo deny --version
+v cargo-fuzz cargo fuzz --version
+v cargo-machete cargo machete --version
+v cargo-mutants cargo mutants --version
+v cargo-nextest cargo nextest --version
+v cargo-pgo cargo pgo --version
+v cargo-semver-checks cargo semver-checks --version
+v cargo-sort cargo sort --version
+v cargo-tarpaulin cargo tarpaulin --version
+v cargo-wizard cargo wizard --version
+v cargo-flamegraph cargo flamegraph --version
+v committed committed --version
+
+echo "-- Lint / hooks / release tools --"
+v actionlint actionlint -version
+v git-cliff git-cliff --version
+v gitleaks gitleaks version
+v hk hk --version
+v taplo taplo --version
+v yamllint-rs yamllint-rs --version
+
+echo "-- Node toolchain (package.json devEngines) --"
+v node node --version
+v pnpm pnpm --version
+
+echo "-- Python tools (pipx) --"
+v codecov-cli codecovcli --version
+
+echo "-- Meta --"
+v mise mise --version
+
+echo "-- Project state --"
+# comply is an EXTERNAL tool here (see [tools]), not a workspace member as it is
+# in its own repository, so report the installed binary rather than a build under
+# target/debug that this workspace never produces.
+if command -v comply >/dev/null 2>&1; then
+    printf "  %-20s : %s\n" "comply" "$(comply --version 2>/dev/null | head -1)"
+else
+    printf "  %-20s : %s\n" "comply" "MISSING (mise install)"
+fi
+printf "  %-20s : %s\n" "nightly" "$(rustup toolchain list 2>/dev/null | grep -m1 nightly || echo 'MISSING (mise run rustup:nightly)')"
+'''
+shell = "bash -c"
+
+# -- Build & check --
+
+[tasks.build]
+alias = ["b"]
+description = "cargo build --workspace"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+export RUSTFLAGS="-C target-cpu=native"
+cargo build --workspace
+unset RUSTFLAGS
+'''
+
+[tasks."build:install"]
+alias = ["bs", "bi", "build:setup"]
+depends = []
+description = "cargo build --workspace"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+mise run build --release
+chmod -v +x target/release/comply
+cp -rfv target/release/comply ~/.local/bin/
+'''
+shell = "bash -c"
+
+[tasks."build:verbose"]
+alias = ["bv"]
+description = "cargo build --workspace with verbosed"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+#export RUSTFLAGS="-C target-cpu=native"
+cargo build --workspace -vvv
+#unset RUSTFLAGS
+'''
+
+# -- Format & lint --
+[tasks."cargo:fmt"]
+alias = []
+description = "Format all Rust code with rustfmt (writes changes)"
+run = "cargo fmt --all"
+
+[tasks."cargo:fmt:check"]
+alias = ["fc"]
+description = "Check Rust formatting without writing (the CI/pre-commit gate)"
+run = "cargo fmt --all -- --check"
+
+[tasks.fmt]
+alias = []
+description = "Format everything (WRITES): rustfmt, then Cargo.toml dependency ordering, then TOML. Run in that order -- taplo takes the final pass, so cargo:sort must precede it"
+run = '''
+mise run cargo:fmt
+mise run cargo:sort
+mise run taplo:fmt
+'''
+
+[tasks."cargo:clippy"]
+alias = ["cl"]
+description = "Lint all targets with clippy at the project standard (-D warnings); the canonical lint gate"
+# The explicit `-- -D warnings` looks redundant with `.cargo/config.toml`'s
+# `[build] rustflags = ["-D", "warnings"]` (which already reaches clippy-driver),
+# but it is a deliberate, env-proof backstop: the `RUSTFLAGS` env var REPLACES
+# build.rustflags rather than merging, so anything that sets RUSTFLAGS (CI tuning,
+# target-cpu, a wrapper) silently drops the config-file gate. Args after `--` go
+# straight to clippy-driver and survive that override. Keep both — do not DRY away.
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.check]
+alias = ["ck"]
+description = "Type-check all targets/features without producing binaries (cargo check)"
+run = "cargo check --all-targets --all-features"
+
+[tasks.lint]
+alias = ["l"]
+description = "fmt:check + clippy (read-only lint gate)"
+run = ["mise run cargo:fmt:check", "mise run cargo:clippy"]
+
+# -- Test --
+
+# -- Security & supply chain --
+
+[tasks."cargo:vet"]
+alias = ["v"]
+description = "cargo vet supply-chain audit (non-blocking until the dependency tree is certified)"
+run = "mkdir -p supply-chain/.cargo-vet && cargo vet --locked || cargo vet || true"
+shell = "bash -c"
+
+[tasks.security]
+alias = ["sec"]
+description = "audit + deny, run in order to avoid an advisory-db clone conflict (mirrors ci.yml)"
+run = ["mise run cargo:audit", "mise run cargo:deny"]
+
+[tasks.hardening]
+alias = []
+description = "SPDX compliance gate (vet/scorecard/SLSA run in CI only)"
+run = ["mise run comply"]
+
+# -- Coverage (HTML variants; the XML gate lives in [tasks.coverage] above) --
+
+[tasks."coverage:html"]
+alias = []
+depends = []
+description = "Coverage as browsable HTML. Reuses `mise run test` so the tarpaulin invocation is declared once; only the output format differs"
+run = "mise run test -- --out Html"
+
+[tasks."coverage:open"]
+alias = []
+depends = ["coverage:html"]
+description = "Generate HTML coverage and open it in the default browser"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+if [ "$(uname -s)" = "Darwin" ]; then
+  open tarpaulin-report.html
+elif command -v xdg-open >/dev/null 2>&1; then
+  xdg-open tarpaulin-report.html
+else
+  echo "Report: $(pwd)/tarpaulin-report.html"
+fi
+'''
+shell = "bash -c"
+
+# -- Benchmarks (the Criterion run lives in [tasks.bench] above) --
+
+[tasks."bench:bencher"]
+alias = []
+description = "Benchmarks in libtest/bencher format (the performance.yml gate's output shape); skips cleanly until a benches/ target exists"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# No benches/ directory anywhere means there is nothing to measure (this repo
+# has no dedicated bench crate yet), so skip cleanly — consistent with the
+# fuzz/flame graceful-skip tasks. Once benches exist the bencher-format output
+# is asserted to contain measurements, matching .github/workflows/performance.yml.
+if ! find crates -type d -name benches 2>/dev/null | grep -q .; then
+    echo "bench-bencher: skipping — no benches/ directory found." >&2
+    exit 0
+fi
+cargo bench --workspace -- --output-format bencher | tee bench-output.txt
+grep -q "ns/iter" bench-output.txt || { echo "::error:: no ns/iter lines emitted"; exit 1; }
+echo "Parsed $(grep -c 'ns/iter' bench-output.txt) measurements."
+'''
+shell = "bash -c"
+
+# -- Fuzz (single-target run lives in [tasks.fuzz] above) --
+
+[tasks."fuzz:all"]
+alias = []
+description = "Run every cargo-fuzz target sequentially (FUZZ_TIME seconds each, default 60). Requires nightly — see `mise run rustup:nightly`. Skips cleanly when no fuzz/ targets exist"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Mirror the single-target `fuzz` task's guard: no fuzz/ directory means no
+# targets, so skip cleanly. Otherwise discover targets dynamically (so this
+# never drifts from fuzz_targets/) and fuzz each for FUZZ_TIME seconds.
+# `crates/comply-fuzz` until now, which never existed -- so this skipped
+# unconditionally while the `fuzz` task looked at `fuzz/`. cargo-fuzz's own
+# convention is `fuzz/` beside the workspace root, which is where the targets
+# actually live.
+if [ ! -d fuzz ]; then
+    echo "fuzz:all: skipping — no fuzz/ directory (no targets yet)." >&2
+    exit 0
+fi
+time_budget="${FUZZ_TIME:-60}"
+# `--target` is NOT optional. cargo-fuzz bakes its default triple in at ITS OWN
+# build time, so the value describes how the binary was produced, not the machine
+# running it -- and cargo-binstall (which mise's `cargo:` backend shells out to)
+# serves the statically linked build. On a gnu Linux host that retargets the
+# build to x86_64-unknown-linux-musl and fails twice over: "sanitizer is
+# incompatible with statically linked libc" (musl enables crt-static by default)
+# and "can't find crate for `core`" (no musl std installed). It is invisible on
+# macOS, where the downloaded binary's triple happens to match the host.
+host="$(rustc +nightly -vV | awk '/^host:/{print $2}')"
+for target in $(cargo +nightly fuzz list); do
+  echo "▶ fuzzing ${target} for ${time_budget}s on ${host}"
+  cargo +nightly fuzz run "$target" --target "$host" -- -max_total_time="$time_budget"
+done
+'''
+shell = "bash -c"
+
+# -- Pre-commit hooks (hk replaces the legacy pre-commit tool) --
+
+[tasks.pre-commit]
+alias = ["pc"]
+description = "Run the hk pre-commit hooks on staged files"
+run = "hk run pre-commit"
+
+[tasks."pre-commit:all"]
+alias = ["pca"]
+description = "Run the hk pre-commit hooks across every file in the repo"
+run = "hk run pre-commit --all-files"
+
+# -- CI mirrors --
+[tasks."ci:quick"]
+alias = ["ciq"]
+description = "Pre-push check: fmt + sort + taplo + version/lock drift + clippy + the coverage gate. No longer the ~1min it was -- tarpaulin instruments a full build -- but it is the same gate CI runs, so a green run here means a green run there"
+# `version:check` and `cargo:lock:check` are here rather than only on the hook.
+# hk gates a step on its glob matching the STAGED file set, and `git commit
+# --amend` stages nothing unless you add something -- so an amend that touches
+# other files, or none, skips both. They are also whole-repo checks that ignore
+# the staged set entirely, which is what makes them safe to repeat here.
+#
+# Early, before clippy and coverage: together they cost about a second, and
+# finding a stale lockfile after a full instrumented build wastes the build.
+run = [
+  "mise run cargo:fmt:check",
+  "mise run cargo:sort:check",
+  "mise run taplo:check",
+  "mise run version:check",
+  "mise run cargo:lock:check",
+  "mise run cargo:clippy",
+  "mise run coverage",
+]
+
+[tasks.ci]
+alias = []
+depends = ["ci:quick"]
+description = "Full PR pipeline (mirrors .github/workflows/ci.yml): fmt + clippy + tests + doctests + header form + security + coverage"
+run = ["mise run comply:format:check"]
+
+[tasks."ci:fix"]
+alias = []
+depends = []
+description = "Full PR pipeline (mirrors .github/workflows/ci.yml): fmt + clippy + tests + doctests + header form + security + coverage"
+run = [
+  "mise run cargo:fmt",
+  "mise run cargo:sort",
+  "mise run taplo:fmt",
+  "mise run coverage",
+  "mise run comply",
+  "mise run cargo:clippy",
+]
+
+[tasks."ci:perf"]
+alias = []
+depends = ["ci"]
+description = "Performance gate (mirrors .github/workflows/performance.yml). Compare against the gh-pages baseline in CI"
+run = ["mise run bench:bencher"]
+
+[tasks."ci:nightly"]
+alias = []
+depends = ["ci"]
+description = "Nightly pipeline (mirrors .github/workflows/nightly.yml): fuzz-all + bench"
+run = ["mise run fuzz:all", "mise run bench"]
+
+[tasks."actions:pins"]
+alias = ["uap"]
+description = "Update all GitHub Actions SHA pins to latest releases. Automatically sets GITHUB_TOKEN via gh auth."
+run = '''
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export GITHUB_TOKEN=$(gh auth token)
+python3 scripts/update-actions-pins.py --write --apply-major
+unset GITHUB_TOKEN
+'''
+
+[tasks."ci:full"]
+alias = []
+description = "ci + performance gate"
+run = ["mise run ci", "mise run ci:perf"]
+
+[tasks."pr:ready"]
+alias = []
+description = "Auto-format then check: ready for PR (fmt + header form + version/lock drift + clippy + tests + doctests)"
+# See the note on `ci:quick`: the version and lockfile gates cannot rely on the
+# pre-commit hook alone, because an amend stages nothing to match their globs
+# against. Ordered before clippy and coverage so a second of checking fails
+# ahead of the instrumented build rather than after it.
+run = [
+  "mise run fmt",
+  "mise run comply:format:check",
+  "mise run version:check",
+  "mise run cargo:lock:check",
+  "mise run cargo:clippy",
+  "mise run coverage",
+]
+
+# -- Docs site (VitePress, managed with bun) --
+
+# The site lives entirely under `docs/`, package.json included. That is what
+# keeps the npm dependency tree out of the repository root and -- because
+# `.dockerignore` already excludes `docs/` -- out of every image build context
+# without a second rule. None of these tasks belong in `ci` or `pr:ready`: a
+# broken docs build must not fail the crate gate.
+
+[tasks."docs:install"]
+# `bun` runs where `package.json` is, which is `docs/`, not the repo root.
+alias = ["docsi"]
+description = "Install the docs site dependencies with bun (docs/node_modules)"
+dir = "docs"
+run = "bun install"
+
+[tasks."docs:dev"]
+# `bun` runs where `package.json` is, which is `docs/`, not the repo root.
+alias = ["docs", "docsd"]
+depends = ["docs:install"]
+description = "Serve the docs site locally with hot reload on http://localhost:5173"
+dir = "docs"
+run = "bun run dev"
+
+[tasks."docs:build"]
+# `bun` runs where `package.json` is, which is `docs/`, not the repo root.
+alias = ["docsb"]
+depends = ["docs:install"]
+description = "Build the docs site into docs/.vitepress/dist. Set DOCS_BASE=/ for a custom domain; the default `/comply/` matches GitHub project pages"
+dir = "docs"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+bun install --locked
+bun run build
+'''
+
+[tasks."docs:typecheck"]
+# `bun` runs where `package.json` is, which is `docs/`, not the repo root.
+alias = ["docstc"]
+depends = ["docs:install"]
+description = "Type-check the site's .ts/.mts sources. Nothing else does: `vitepress build` transpiles without type-checking, so an error in config.mts or mermaid.ts only ever surfaced in an editor"
+dir = "docs"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+bun install --locked
+bun run typecheck
+'''
+shell = "bash -c"
+
+[tasks."docs:preview"]
+# `bun` runs where `package.json` is, which is `docs/`, not the repo root.
+alias = ["docsp"]
+depends = ["docs:build"]
+description = "Serve the built docs site, to check the production build before publishing"
+dir = "docs"
+run = "bun run preview"
+
+# -- Clean --
+
+[tasks.clean]
+alias = []
+description = "cargo clean (removes target/)"
+run = "cargo clean"
+
+# -- Branch Protection --
+[tasks."gh:branch:protect"]
+alias = ["bp"]
+description = "Apply branch protection rules to the default branch (force-push allowed for admins, required CI/Mise, require PR reviews). Pass --check to report the current rules without writing"
+hide = true
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Repo and branch are RESOLVED, not hardcoded. This read `repos/elioseverojunior/
+# comply/branches/main/protection` literally, so running it from a fork -- or
+# after a rename -- rewrote protection on the upstream repository instead of the
+# one checked out, silently and with admin rights. `gh:env:protect` resolves the
+# same way; keep them consistent.
+repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+branch="$(gh repo view --json defaultBranchRef -q .defaultBranchRef.name)"
+
+if [ "${usage_check:-false}" = true ]; then
+    echo "repo: ${repo}   default branch: ${branch}"
+    gh api "repos/${repo}/branches/${branch}/protection" \
+        -q '{required_status_checks: (.required_status_checks.contexts // []),
+             enforce_admins: .enforce_admins.enabled,
+             required_reviews: (.required_pull_request_reviews != null),
+             required_signatures: .required_signatures.enabled,
+             linear_history: .required_linear_history.enabled}' 2>/dev/null \
+        || echo "  no protection configured"
+    exit 0
+fi
+
+# Apply branch protection with admin bypass
+GH_PAGER= gh api -X PUT "repos/${repo}/branches/${branch}/protection" \
+  --input - << 'EOF'
+{
+    "required_status_checks": {
+        "strict": true,
+        "contexts": [
+            "CI",
+            "Mise"
+        ]
+    },
+    "enforce_admins": false,
+    "required_pull_request_reviews": {
+        "dismiss_stale_reviews": true,
+        "require_code_owner_reviews": true,
+        "required_approving_review_count": 1
+    },
+    "required_signatures": true,
+    "required_linear_history": true,
+    "allow_force_pushes": true,
+    "allow_deletions": false,
+    "block_creations": false,
+    "required_conversation_resolution": true,
+    "lock_branch": false,
+    "allow_fork_syncing": false,
+    "restrictions": null
+}
+EOF
+
+echo "Branch protection applied to ${branch} on ${repo}"
+'''
+shell = "bash -c"
+usage = 'flag "--check" help="report the current rules without writing"'
+
+[tasks."gh:env:protect"]
+alias = ["ep"]
+description = "Apply deployment-environment protection to crates-io (required reviewer + protected branches) and github-pages (branch policy). Idempotent; pass --check to report drift without writing"
+hide = true
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Environment protection is the ONLY thing narrowing crates.io Trusted
+# Publishing. crates.io matches the OIDC `workflow_ref` claim, which for a
+# reusable workflow is the CALLER -- publish.yml runs as a called workflow, so
+# the registered filename is `cicd.yml` and the grant covers any job in it. The
+# `crates-io` environment is what brings that back to "a human approved this,
+# from a protected branch".
+repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
+checking="${usage_check:-false}"
+
+# The reviewer is resolved, not hardcoded: `gh:branch:protect` above hardcodes
+# elioseverojunior/comply and silently targets the wrong repository from a fork.
+reviewer_login="$(gh api user -q .login)"
+reviewer_id="$(gh api user -q .id)"
+
+# `prevent_self_review` stays FALSE deliberately. With a single reviewer it would
+# make every deployment unapprovable -- the one person who can approve is the one
+# who triggered it -- and publishing would block forever. Set it true only once a
+# second reviewer exists.
+crates_io=$(cat <<EOF
+{
+  "wait_timer": 0,
+  "prevent_self_review": false,
+  "reviewers": [{ "type": "User", "id": ${reviewer_id} }],
+  "deployment_branch_policy": { "protected_branches": true, "custom_branch_policies": false }
+}
+EOF
+)
+
+# github-pages gets a branch policy but NO required reviewer. The docs site
+# publishes on every release; an approval prompt there buys nothing and would
+# stall an otherwise unattended pipeline. `custom_branch_policies` rather than
+# `protected_branches` because `gh-pages` is a deploy target, not a protected
+# branch, and peaceiris/actions-gh-pages pushes to it directly.
+github_pages=$(cat <<'EOF'
+{
+  "wait_timer": 0,
+  "deployment_branch_policy": { "protected_branches": false, "custom_branch_policies": true }
+}
+EOF
+)
+
+show() {
+    gh api "repos/${repo}/environments/$1" \
+        -q '{name, rules: [.protection_rules[]?.type], branch_policy: .deployment_branch_policy}' 2>/dev/null \
+        || echo "  $1: does not exist"
+}
+
+if [ "$checking" = true ]; then
+    echo "repo: ${repo}   reviewer: ${reviewer_login} (${reviewer_id})"
+    for env in crates-io github-pages; do show "$env"; done
+    exit 0
+fi
+
+printf '%s' "${crates_io}" | GH_PAGER= gh api -X PUT "repos/${repo}/environments/crates-io" --input - >/dev/null
+echo "crates-io: required reviewer ${reviewer_login}, protected branches only"
+
+printf '%s' "${github_pages}" | GH_PAGER= gh api -X PUT "repos/${repo}/environments/github-pages" --input - >/dev/null
+# PUT resets custom branch policies, so they are re-declared here rather than
+# assumed to survive. `gh-pages` is the deploy branch; `main` is what dispatches.
+for branch in gh-pages main; do
+    GH_PAGER= gh api -X POST "repos/${repo}/environments/github-pages/deployment-branch-policies" \
+        -f "name=${branch}" -f "type=branch" >/dev/null 2>&1 || true
+done
+echo "github-pages: branch policy (gh-pages, main), no reviewer required"
+'''
+shell = "bash -c"
+usage = 'flag "--check" help="report the current rules without writing"'
+
+[tasks."clean:cov"]
+alias = []
+description = "Remove coverage artifacts"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+rm -f cobertura.xml tarpaulin-report.html tarpaulin-report.json bench-output.txt
+rm -rf target/tarpaulin
+'''
+shell = "bash -c"
+
+[tasks."clean:bench"]
+alias = []
+description = "Remove Criterion reports"
+run = "rm -rf target/criterion"
+
+[tasks."clean:fuzz"]
+alias = []
+description = "Remove generated fuzz corpus, artifacts, and build output (keeps any committed corpus/seed/)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Only the libFuzzer-generated corpus dirs (corpus/fuzz_*) are removable; a
+# committed corpus/seed/ would be tracked and must survive. nullglob keeps this
+# a no-op when no fuzz/ directory or generated corpus exists yet.
+shopt -s nullglob
+rm -rf fuzz/artifacts fuzz/target fuzz/corpus/fuzz_*
+'''
+shell = "bash -c"
+
+[tasks."clean:all"]
+alias = []
+description = "Full clean: target/, coverage, criterion, fuzz, and the cargo advisory-db"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+mise run clean
+mise run clean:cov
+mise run clean:bench
+mise run clean:fuzz
+rm -rf "${HOME}/.cargo/advisory-db"
+'''
+shell = "bash -c"
+
+[tasks."actions:cancel"]
+alias = ["cancel-actions", "cancel-ci"]
+description = "Cancel all in-progress/queued GitHub Actions workflows for this repo"
+hide = true
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+repo=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+
+ids=$(gh run list --repo "${repo}" --limit 100 --json databaseId,status \
+  --jq '.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting") | .databaseId')
+
+if [[ -z "${ids}" ]]; then
+  echo "No running workflows to cancel."
+  exit 0
+fi
+
+echo "${ids}" | while IFS= read -r id; do
+  echo "Cancelling run ${id}..."
+  gh run cancel --repo "${repo}" "${id}"
+done
+'''
+
+# --- supply chain ----------------------------------------------------------
+[tasks.scorecard]
+alias = ["sco"]
+description = "Score supply-chain health with OpenSSF Scorecard"
+# Extra flags pass straight through, e.g. `mise run sco --checks=Binary-Artifacts`.
+run = '''
+#!/usr/bin/env bash
+
+set -eo pipefail
+
+# `scorecard --local` walks the filesystem directly and has NO exclude/ignore
+# flag, so pointing it at the repo root scans build/ and build/DerivedData
+# (gigabytes of build output) and scores Binary-Artifacts 0/10 on compiled
+# dependencies. Mirror only the tracked files into a scratch tree instead:
+# `git ls-files` IS the exclusion mechanism, since a path .gitignore excludes is
+# never tracked and so can never reach the scan. Local mode runs the
+# filesystem-based checks; the history/API ones are skipped either way, so the
+# tree needs no .git.
+#
+# Copy working-tree content (not `git checkout-index`, which reads the index)
+# so an edit you have not staged yet is what actually gets scored.
+root="$(git rev-parse --show-toplevel)"
+out="${SCORECARD_OUTPUT:-$root/scorecard.json}"
+
+tree="$(mktemp -d)"
+raw="$(mktemp)"
+trap 'rm -rf "$tree" "$raw"' EXIT
+
+while IFS= read -r -d '' f; do
+  [ -f "$root/$f" ] || [ -L "$root/$f" ] || continue
+  mkdir -p "$tree/$(dirname "$f")"
+  cp -Pp "$root/$f" "$tree/$f"
+done < <(git -C "$root" ls-files -z)
+
+eval "args=(${usage_args:-})"
+
+# A filtered run (--checks=...) produces a partial report whose aggregate score
+# is computed from only those checks — writing that over scorecard.json makes a
+# single 10/10 check look like a perfect overall score. Send filtered runs to a
+# separate file so the canonical report is always a complete scan.
+# Tested against usage_args rather than the array length: mise renders run
+# blocks as tera templates, and bash's ${#array[@]} opens a tera comment (`{#`),
+# which fails the task with "Closing comment tag `#}` not found".
+if [ -n "${usage_args:-}" ]; then
+  out="${out%.json}.partial.json"
+fi
+
+scorecard \
+  --local="$tree" \
+  --format json \
+  --show-details \
+  --show-annotations \
+  --output "$raw" \
+  "${args[@]}"
+
+# scorecard reports the directory it was pointed at, so --local leaves the
+# scratch mirror's mktemp path in .repo.name and cannot resolve .repo.commit at
+# all. Restore the real identity; mark it -dirty because the scan copies
+# working-tree content, which by definition may differ from HEAD.
+name="$(git -C "$root" remote get-url origin 2>/dev/null || basename "$root")"
+commit="$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)"
+if [ -n "$(git -C "$root" status --porcelain)" ]; then
+  commit="$commit-dirty"
+fi
+
+jq --arg name "$name" --arg commit "$commit" \
+  '.repo.name = $name | .repo.commit = $commit' "$raw" > "$out"
+
+echo "wrote $out ($(jq '.checks | length' "$out") checks, score $(jq '.score' "$out"))"
+cat "$out" | jq -Sr '.' > "$out.new"
+mv "$out.new" "$out"
+'''
+shell = "bash -c"
+usage = 'arg "[args]" var=#true help="extra scorecard flags, e.g. --checks=Binary-Artifacts"'

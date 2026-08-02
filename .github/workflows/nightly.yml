@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Nightly Fuzz & Bench
+
+concurrency:
+  group: nightly-fuzz-bench-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+# Read-only at the top level; each job below declares what it actually needs,
+# and a job's `permissions` block replaces this default rather than narrowing
+# it. The constraint for the `bench` job's reusable-workflow call is that
+# performance.yml's permissions be a subset of that JOB's -- which they are,
+# both being `contents: write` -- not a subset of this workflow-level key.
+# performance.yml itself uses the same shape: `read-all` on top, `contents:
+# write` on the job that needs it.
+#
+# This was briefly `contents: write` here, on the theory that the top level
+# capped the job and caused nightly's `startup_failure`. That theory is
+# unconfirmed -- nightly has not re-run since -- and a workflow-wide write is
+# what scores Token-Permissions 0, so it is back to read.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      # Via setup-rust-env, not the toolchain action directly: that path also
+      # installs mold, which .cargo/config.toml requires for every Linux cargo
+      # invocation, and brings the rust-cache with it.
+      #
+      # cargo-fuzz needs nightly for the sanitizer -Z flags; the steps below run
+      # `cargo +nightly`, so without the channel the project one gets installed
+      # and every fuzz invocation fails on a missing toolchain.
+      - uses: ./.github/actions/setup-rust-env
+        with:
+          toolchain: nightly
+          cargo-tools: cargo-fuzz
+          rust-cache-shared-key: nightly
+
+      - name: Check for fuzz targets
+        id: has-fuzz
+        run: |
+          if [ -d fuzz ] || ls crates/*-fuzz/Cargo.toml 2>/dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: List targets
+        if: steps.has-fuzz.outputs.found == 'true'
+        id: list-targets
+        run: |
+          targets=$(cargo +nightly fuzz list 2>/dev/null | tr '\n' ' ')
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+
+      - name: Run fuzzer (5 min each)
+        if: steps.has-fuzz.outputs.found == 'true'
+        run: |
+          # `--target` is NOT optional here. cargo-fuzz bakes its default triple
+          # in at ITS OWN build time, so the value describes how the binary was
+          # produced, not the machine running it. cargo-binstall serves the
+          # statically linked build, so every fuzz run retargeted to
+          # x86_64-unknown-linux-musl on a gnu runner and failed twice over:
+          # "sanitizer is incompatible with statically linked libc" (musl enables
+          # crt-static by default) and "can't find crate for `core`" (no musl std
+          # installed). Deriving it from rustc makes the target a property of the
+          # runner, which also keeps this correct if RUNS_ON moves to arm64.
+          host="$(rustc +nightly -vV | awk '/^host:/{print $2}')"
+          for target in ${{ steps.list-targets.outputs.targets }}; do
+            echo "Fuzzing $target for 300s on $host..."
+            cargo +nightly fuzz run "$target" --target "$host" -- -max_total_time=300
+          done
+
+      - name: Upload crash artifacts
+        if: failure() && steps.has-fuzz.outputs.found == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fuzz-crash
+          path: fuzz/artifacts/
+
+# A Benchmarks job delegated to performance.yml here. Both are gone: the
+# workflow was deleted, and there are no benches for it to run -- no `benches/`
+# directory and no `[[bench]]` target anywhere in the workspace, so every run
+# was a guard that found nothing. Reinstate together with the first real bench.
+
+# A Miri job lived here. It was removed: `unsafe_code = "deny"` applies to the
+# whole workspace, so there is no undefined behaviour for Miri to find -- the
+# compiler already rejects the constructs that produce it. What remained was an
+# interpreter running the suite orders of magnitude slower to prove a guarantee
+# already held, on a tool whose work is walking the filesystem and shelling out
+# to git, most of which Miri cannot execute at all.
+#
+# If unsafe is ever introduced, reinstate it: nightly channel, `components:
+# miri`, `cargo-tools: ""`, and `MIRIFLAGS=-Zmiri-strict-provenance`.

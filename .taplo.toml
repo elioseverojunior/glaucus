@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# taplo configuration ~ https://taplo.tamasfe.dev/configuration/file.html
+#
+# taplo is the formatter of record for EVERY .toml in this repo. It is
+# auto-discovered at the repo root, so no --config flag is needed — the same way
+# gitleaks finds .gitleaks.toml and actionlint finds .github/actionlint.yaml.
+#
+# Division of labour with cargo-sort: cargo-sort owns Cargo.toml *dependency*
+# ordering, taplo owns *formatting*. The pipeline runs `cargo sort` first, then
+# `taplo fmt` as the final normalizing pass.
+
+# Files taplo must not rewrite. Each is owned by something else that regenerates
+# it, so reformatting them shows up as spurious drift in that tool's gate:
+#   * committed.toml is generated from commit-types.toml by
+#     scripts/commit-config.py, which emits its own key order — reformatting it
+#     makes `mise run commit-config-check` report drift and blocks every commit.
+#   * cargo-vet rewrites everything under supply-chain/.cargo-vet.
+#   * target/ is build output, including unpacked .crate manifests.
+#   * The yaml-test-suite submodule is a third-party conformance corpus; never
+#     reformat vendored sources even though it carries no .toml today.
+exclude = [
+  "committed.toml",
+  "supply-chain/.cargo-vet/**",
+  "target/**",
+  "crates/glaucus-yaml-test-suite/data/**",
+]
+
+[formatting]
+# taplo pads trailing comments into a column while cargo-sort emits a single
+# space, and each rewrites what the other just wrote — so `cargo:sort:check` and
+# `taplo:check` could never both pass on a Cargo.toml with inline comments.
+# taplo is the formatter of record, so it yields on this one point rather than
+# the two fighting forever.
+align_comments = false
+indent_string = "  "
+indent_table = true
+# Alphabetical key order. This does NOT fight cargo-sort: both sort
+# alphabetically, so `cargo sort --check` and `taplo fmt --check` agree on
+# dependency tables, and TOML key order is not semantic anywhere else.
+reorder_keys = true
+
+[schema]
+# Cargo.toml uses [lints.rust], which the SchemaStore schema doesn't recognize.
+# Disable schema validation to suppress the false-positive warnings.
+enabled = false

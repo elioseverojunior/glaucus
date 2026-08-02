@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# cargo-sort formatting configuration
+# https://github.com/DevinR528/cargo-sort
+#
+# Specifies TOML formatting rules for cargo-sort's output. This file is
+# auto-discovered at the repo root (no --config flag needed when used from mise).
+#
+# Indentation: 2 spaces (Rust convention, matches .editorconfig)
+allowed_blank_lines = 2
+always_trailing_comma = false
+compact_arrays = false
+compact_inline_tables = false
+crlf = false
+indent_count = 2
+indent_style = "space"
+key_value_newlines = true
+multiline_trailing_comma = true
+space_around_eq = true
+table_order = [
+  "package",
+  "features",
+  "dependencies",
+  "build-dependencies",
+  "dev-dependencies",
+  "workspace",
+]
+trailing_newline = true

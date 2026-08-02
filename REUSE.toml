@@ -1,0 +1,58 @@
+SPDX-PackageDownloadLocation = "https://github.com/elioseverojunior/glaucus"
+SPDX-PackageName = "glaucus"
+SPDX-PackageSupplier = "Glaucus contributors"
+version = 1
+
+[[annotations]]
+SPDX-FileCopyrightText = "Glaucus contributors"
+SPDX-License-Identifier = "MIT OR Apache-2.0"
+path = ["**"]
+precedence = "aggregate"
+
+[[annotations]]
+SPDX-FileCopyrightText = "YAML test suite contributors"
+SPDX-License-Identifier = "MIT"
+path = ["crates/glaucus-yaml-test-suite/data/**"]
+precedence = "aggregate"
+
+[tool.comply]
+# Custom comply settings
+ignore = [
+  "**/*.ico",
+  "**/*.lock",
+  "**/*.png",
+  "**/*.svg",
+  "**/*yaml-test-suite/data/",
+  "**/*yaml-test-suite/data/**",
+  "**/.actrc",
+  "**/.aider.*/",
+  "**/.bun-version",
+  "**/.nvmrc",
+  "**/.prettierignore",
+  "**/.prettierrc",
+  "**/.remember/",
+  "**/.rumdl_cache/",
+  "**/bench-report/",
+  "**/benchmarks.json",
+  "**/committed.toml",
+  "**/dist/",
+  "**/docs/benchmarks/latest.md",
+  "**/docs/index.md",
+  "**/mutants*/",
+  "**/package*.json",
+  "**/supply-chain/.cargo-vet/**",
+  "**/tsconfig*.json",
+]
+
+[[tool.comply.comment-styles]]
+close = ""
+filenames = [".gitmessage"]
+line = ""
+open = "#"
+
+[[tool.comply.comment-styles]]
+close = ""
+extensions = ["pkl"]
+filenames = ["hk.pkl"]
+line = ""
+open = "//"

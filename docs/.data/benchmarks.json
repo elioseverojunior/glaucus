@@ -1,0 +1,628 @@
+{
+  "generated_at": "2026-08-01T06:56:12Z",
+  "commit": "daf377c",
+  "branch": "main",
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "platform": "Darwin 24.6.0 x86_64",
+  "runner": "local workstation (Intel Xeon W-2150B @ 3.00GHz, 10c/20t)",
+  "quality": "degraded",
+  "note": "Host was executing roughly 8x slow: every figure comparable to the 2026-06-03 baseline came out 4.57x-20.89x slower, including third-party serde_json, and a pure single-core loop took 5.19s against ~0.4s expected. Ratios between libraries are indicative; absolute times are not usable. Replaced automatically by the first clean CI run.",
+  "measurements": [
+    {
+      "id": "composer/glaucus/small",
+      "group": "composer",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 218210,
+      "deviation_ns": 1845
+    },
+    {
+      "id": "composer/yaml_rust2/small",
+      "group": "composer",
+      "library": "yaml_rust2",
+      "fixture": "small",
+      "ns_per_iter": 292980,
+      "deviation_ns": 3690
+    },
+    {
+      "id": "composer/rust_yaml/small",
+      "group": "composer",
+      "library": "rust_yaml",
+      "fixture": "small",
+      "ns_per_iter": 481880,
+      "deviation_ns": 5555
+    },
+    {
+      "id": "composer/glaucus/medium",
+      "group": "composer",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 2016200,
+      "deviation_ns": 18550
+    },
+    {
+      "id": "composer/yaml_rust2/medium",
+      "group": "composer",
+      "library": "yaml_rust2",
+      "fixture": "medium",
+      "ns_per_iter": 2957900,
+      "deviation_ns": 34700
+    },
+    {
+      "id": "composer/rust_yaml/medium",
+      "group": "composer",
+      "library": "rust_yaml",
+      "fixture": "medium",
+      "ns_per_iter": 8370800,
+      "deviation_ns": 92400
+    },
+    {
+      "id": "composer/glaucus/large",
+      "group": "composer",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 101920000,
+      "deviation_ns": 745000
+    },
+    {
+      "id": "composer/yaml_rust2/large",
+      "group": "composer",
+      "library": "yaml_rust2",
+      "fixture": "large",
+      "ns_per_iter": 149680000,
+      "deviation_ns": 1320000
+    },
+    {
+      "id": "composer/rust_yaml/large",
+      "group": "composer",
+      "library": "rust_yaml",
+      "fixture": "large",
+      "ns_per_iter": 5429200000,
+      "deviation_ns": 13900000
+    },
+    {
+      "id": "emitter/glaucus/small",
+      "group": "emitter",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 20215,
+      "deviation_ns": 235
+    },
+    {
+      "id": "emitter/yaml_rust2/small",
+      "group": "emitter",
+      "library": "yaml_rust2",
+      "fixture": "small",
+      "ns_per_iter": 48319,
+      "deviation_ns": 500
+    },
+    {
+      "id": "emitter/rust_yaml/small",
+      "group": "emitter",
+      "library": "rust_yaml",
+      "fixture": "small",
+      "ns_per_iter": 206550,
+      "deviation_ns": 2025
+    },
+    {
+      "id": "emitter/glaucus/medium",
+      "group": "emitter",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 249640,
+      "deviation_ns": 2750
+    },
+    {
+      "id": "emitter/yaml_rust2/medium",
+      "group": "emitter",
+      "library": "yaml_rust2",
+      "fixture": "medium",
+      "ns_per_iter": 483790,
+      "deviation_ns": 4935
+    },
+    {
+      "id": "emitter/rust_yaml/medium",
+      "group": "emitter",
+      "library": "rust_yaml",
+      "fixture": "medium",
+      "ns_per_iter": 3074600,
+      "deviation_ns": 33550
+    },
+    {
+      "id": "emitter/glaucus/large",
+      "group": "emitter",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 11784000,
+      "deviation_ns": 134000
+    },
+    {
+      "id": "emitter/yaml_rust2/large",
+      "group": "emitter",
+      "library": "yaml_rust2",
+      "fixture": "large",
+      "ns_per_iter": 24650000,
+      "deviation_ns": 228000
+    },
+    {
+      "id": "emitter/rust_yaml/large",
+      "group": "emitter",
+      "library": "rust_yaml",
+      "fixture": "large",
+      "ns_per_iter": 188440000,
+      "deviation_ns": 1850000
+    },
+    {
+      "id": "roundtrip_node/small",
+      "group": "roundtrip_node",
+      "library": null,
+      "fixture": "small",
+      "ns_per_iter": 448590,
+      "deviation_ns": 4255
+    },
+    {
+      "id": "roundtrip_node/medium",
+      "group": "roundtrip_node",
+      "library": null,
+      "fixture": "medium",
+      "ns_per_iter": 4393700,
+      "deviation_ns": 35600
+    },
+    {
+      "id": "roundtrip_node/large",
+      "group": "roundtrip_node",
+      "library": null,
+      "fixture": "large",
+      "ns_per_iter": 216680000,
+      "deviation_ns": 1760000
+    },
+    {
+      "id": "roundtrip_compare/glaucus/small",
+      "group": "roundtrip_compare",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 234430,
+      "deviation_ns": 1985
+    },
+    {
+      "id": "roundtrip_compare/yaml_rust2/small",
+      "group": "roundtrip_compare",
+      "library": "yaml_rust2",
+      "fixture": "small",
+      "ns_per_iter": 345480,
+      "deviation_ns": 3340
+    },
+    {
+      "id": "roundtrip_compare/rust_yaml/small",
+      "group": "roundtrip_compare",
+      "library": "rust_yaml",
+      "fixture": "small",
+      "ns_per_iter": 702810,
+      "deviation_ns": 7760
+    },
+    {
+      "id": "roundtrip_compare/glaucus/medium",
+      "group": "roundtrip_compare",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 2303800,
+      "deviation_ns": 24600
+    },
+    {
+      "id": "roundtrip_compare/yaml_rust2/medium",
+      "group": "roundtrip_compare",
+      "library": "yaml_rust2",
+      "fixture": "medium",
+      "ns_per_iter": 3517800,
+      "deviation_ns": 39950
+    },
+    {
+      "id": "roundtrip_compare/rust_yaml/medium",
+      "group": "roundtrip_compare",
+      "library": "rust_yaml",
+      "fixture": "medium",
+      "ns_per_iter": 11637000,
+      "deviation_ns": 84500
+    },
+    {
+      "id": "roundtrip_compare/glaucus/large",
+      "group": "roundtrip_compare",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 115200000,
+      "deviation_ns": 850000
+    },
+    {
+      "id": "roundtrip_compare/yaml_rust2/large",
+      "group": "roundtrip_compare",
+      "library": "yaml_rust2",
+      "fixture": "large",
+      "ns_per_iter": 174070000,
+      "deviation_ns": 1220000
+    },
+    {
+      "id": "roundtrip_compare/rust_yaml/large",
+      "group": "roundtrip_compare",
+      "library": "rust_yaml",
+      "fixture": "large",
+      "ns_per_iter": 5673800000,
+      "deviation_ns": 18100000
+    },
+    {
+      "id": "full_pipeline_node/facade/small",
+      "group": "full_pipeline_node",
+      "library": "facade",
+      "fixture": "small",
+      "ns_per_iter": 211890,
+      "deviation_ns": 2725
+    },
+    {
+      "id": "full_pipeline_node/compose_all/small",
+      "group": "full_pipeline_node",
+      "library": "compose_all",
+      "fixture": "small",
+      "ns_per_iter": 221260,
+      "deviation_ns": 2915
+    },
+    {
+      "id": "full_pipeline_node/facade/medium",
+      "group": "full_pipeline_node",
+      "library": "facade",
+      "fixture": "medium",
+      "ns_per_iter": 2041300,
+      "deviation_ns": 23900
+    },
+    {
+      "id": "full_pipeline_node/compose_all/medium",
+      "group": "full_pipeline_node",
+      "library": "compose_all",
+      "fixture": "medium",
+      "ns_per_iter": 2047400,
+      "deviation_ns": 24200
+    },
+    {
+      "id": "full_pipeline_node/facade/large",
+      "group": "full_pipeline_node",
+      "library": "facade",
+      "fixture": "large",
+      "ns_per_iter": 102710000,
+      "deviation_ns": 875000
+    },
+    {
+      "id": "full_pipeline_node/compose_all/large",
+      "group": "full_pipeline_node",
+      "library": "compose_all",
+      "fixture": "large",
+      "ns_per_iter": 102880000,
+      "deviation_ns": 890000
+    },
+    {
+      "id": "typed_struct/deserialize",
+      "group": "typed_struct",
+      "library": null,
+      "fixture": "deserialize",
+      "ns_per_iter": 227790,
+      "deviation_ns": 2635
+    },
+    {
+      "id": "typed_struct/roundtrip",
+      "group": "typed_struct",
+      "library": null,
+      "fixture": "roundtrip",
+      "ns_per_iter": 270590,
+      "deviation_ns": 3895
+    },
+    {
+      "id": "parser/glaucus/small",
+      "group": "parser",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 161600,
+      "deviation_ns": 2200
+    },
+    {
+      "id": "parser/yaml_rust2/small",
+      "group": "parser",
+      "library": "yaml_rust2",
+      "fixture": "small",
+      "ns_per_iter": 178950,
+      "deviation_ns": 2920
+    },
+    {
+      "id": "parser/glaucus/medium",
+      "group": "parser",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 1473600,
+      "deviation_ns": 21100
+    },
+    {
+      "id": "parser/yaml_rust2/medium",
+      "group": "parser",
+      "library": "yaml_rust2",
+      "fixture": "medium",
+      "ns_per_iter": 1872100,
+      "deviation_ns": 34450
+    },
+    {
+      "id": "parser/glaucus/large",
+      "group": "parser",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 74323000,
+      "deviation_ns": 708500
+    },
+    {
+      "id": "parser/yaml_rust2/large",
+      "group": "parser",
+      "library": "yaml_rust2",
+      "fixture": "large",
+      "ns_per_iter": 92449000,
+      "deviation_ns": 889000
+    },
+    {
+      "id": "scanner/glaucus/small",
+      "group": "scanner",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 70588,
+      "deviation_ns": 916
+    },
+    {
+      "id": "scanner/glaucus/medium",
+      "group": "scanner",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 706950,
+      "deviation_ns": 7425
+    },
+    {
+      "id": "scanner/glaucus/large",
+      "group": "scanner",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 35085000,
+      "deviation_ns": 316500
+    },
+    {
+      "id": "serde_deserialize/glaucus/small",
+      "group": "serde_deserialize",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 234790,
+      "deviation_ns": 3195
+    },
+    {
+      "id": "serde_deserialize/serde_json/small",
+      "group": "serde_deserialize",
+      "library": "serde_json",
+      "fixture": "small",
+      "ns_per_iter": 29708,
+      "deviation_ns": 370
+    },
+    {
+      "id": "serde_deserialize/noyalib/small",
+      "group": "serde_deserialize",
+      "library": "noyalib",
+      "fixture": "small",
+      "ns_per_iter": 247050,
+      "deviation_ns": 3350
+    },
+    {
+      "id": "serde_deserialize/serde_yaml_ng/small",
+      "group": "serde_deserialize",
+      "library": "serde_yaml_ng",
+      "fixture": "small",
+      "ns_per_iter": 306700,
+      "deviation_ns": 5900
+    },
+    {
+      "id": "serde_deserialize/serde_saphyr/small",
+      "group": "serde_deserialize",
+      "library": "serde_saphyr",
+      "fixture": "small",
+      "ns_per_iter": 540810,
+      "deviation_ns": 6655
+    },
+    {
+      "id": "serde_deserialize/glaucus/medium",
+      "group": "serde_deserialize",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 2267500,
+      "deviation_ns": 27000
+    },
+    {
+      "id": "serde_deserialize/serde_json/medium",
+      "group": "serde_deserialize",
+      "library": "serde_json",
+      "fixture": "medium",
+      "ns_per_iter": 314420,
+      "deviation_ns": 5910
+    },
+    {
+      "id": "serde_deserialize/noyalib/medium",
+      "group": "serde_deserialize",
+      "library": "noyalib",
+      "fixture": "medium",
+      "ns_per_iter": 2326200,
+      "deviation_ns": 25850
+    },
+    {
+      "id": "serde_deserialize/serde_yaml_ng/medium",
+      "group": "serde_deserialize",
+      "library": "serde_yaml_ng",
+      "fixture": "medium",
+      "ns_per_iter": 3182000,
+      "deviation_ns": 39950
+    },
+    {
+      "id": "serde_deserialize/serde_saphyr/medium",
+      "group": "serde_deserialize",
+      "library": "serde_saphyr",
+      "fixture": "medium",
+      "ns_per_iter": 5206900,
+      "deviation_ns": 48900
+    },
+    {
+      "id": "serde_deserialize/glaucus/large",
+      "group": "serde_deserialize",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 114130000,
+      "deviation_ns": 965000
+    },
+    {
+      "id": "serde_deserialize/serde_json/large",
+      "group": "serde_deserialize",
+      "library": "serde_json",
+      "fixture": "large",
+      "ns_per_iter": 14109000,
+      "deviation_ns": 180500
+    },
+    {
+      "id": "serde_deserialize/noyalib/large",
+      "group": "serde_deserialize",
+      "library": "noyalib",
+      "fixture": "large",
+      "ns_per_iter": 115350000,
+      "deviation_ns": 1125000
+    },
+    {
+      "id": "serde_deserialize/serde_yaml_ng/large",
+      "group": "serde_deserialize",
+      "library": "serde_yaml_ng",
+      "fixture": "large",
+      "ns_per_iter": 151260000,
+      "deviation_ns": 1840000
+    },
+    {
+      "id": "serde_deserialize/serde_saphyr/large",
+      "group": "serde_deserialize",
+      "library": "serde_saphyr",
+      "fixture": "large",
+      "ns_per_iter": 263830000,
+      "deviation_ns": 3015000
+    },
+    {
+      "id": "serde_serialize/glaucus/small",
+      "group": "serde_serialize",
+      "library": "glaucus",
+      "fixture": "small",
+      "ns_per_iter": 43253,
+      "deviation_ns": 614
+    },
+    {
+      "id": "serde_serialize/serde_json/small",
+      "group": "serde_serialize",
+      "library": "serde_json",
+      "fixture": "small",
+      "ns_per_iter": 12777,
+      "deviation_ns": 178
+    },
+    {
+      "id": "serde_serialize/noyalib/small",
+      "group": "serde_serialize",
+      "library": "noyalib",
+      "fixture": "small",
+      "ns_per_iter": 65227,
+      "deviation_ns": 765
+    },
+    {
+      "id": "serde_serialize/serde_yaml_ng/small",
+      "group": "serde_serialize",
+      "library": "serde_yaml_ng",
+      "fixture": "small",
+      "ns_per_iter": 147920,
+      "deviation_ns": 1630
+    },
+    {
+      "id": "serde_serialize/serde_saphyr/small",
+      "group": "serde_serialize",
+      "library": "serde_saphyr",
+      "fixture": "small",
+      "ns_per_iter": 105130,
+      "deviation_ns": 1215
+    },
+    {
+      "id": "serde_serialize/glaucus/medium",
+      "group": "serde_serialize",
+      "library": "glaucus",
+      "fixture": "medium",
+      "ns_per_iter": 525330,
+      "deviation_ns": 7035
+    },
+    {
+      "id": "serde_serialize/serde_json/medium",
+      "group": "serde_serialize",
+      "library": "serde_json",
+      "fixture": "medium",
+      "ns_per_iter": 154820,
+      "deviation_ns": 1835
+    },
+    {
+      "id": "serde_serialize/noyalib/medium",
+      "group": "serde_serialize",
+      "library": "noyalib",
+      "fixture": "medium",
+      "ns_per_iter": 679350,
+      "deviation_ns": 12960
+    },
+    {
+      "id": "serde_serialize/serde_yaml_ng/medium",
+      "group": "serde_serialize",
+      "library": "serde_yaml_ng",
+      "fixture": "medium",
+      "ns_per_iter": 1518800,
+      "deviation_ns": 18100
+    },
+    {
+      "id": "serde_serialize/serde_saphyr/medium",
+      "group": "serde_serialize",
+      "library": "serde_saphyr",
+      "fixture": "medium",
+      "ns_per_iter": 1078200,
+      "deviation_ns": 13750
+    },
+    {
+      "id": "serde_serialize/glaucus/large",
+      "group": "serde_serialize",
+      "library": "glaucus",
+      "fixture": "large",
+      "ns_per_iter": 30138000,
+      "deviation_ns": 379500
+    },
+    {
+      "id": "serde_serialize/serde_json/large",
+      "group": "serde_serialize",
+      "library": "serde_json",
+      "fixture": "large",
+      "ns_per_iter": 7187000,
+      "deviation_ns": 88950
+    },
+    {
+      "id": "serde_serialize/noyalib/large",
+      "group": "serde_serialize",
+      "library": "noyalib",
+      "fixture": "large",
+      "ns_per_iter": 32854000,
+      "deviation_ns": 420500
+    },
+    {
+      "id": "serde_serialize/serde_yaml_ng/large",
+      "group": "serde_serialize",
+      "library": "serde_yaml_ng",
+      "fixture": "large",
+      "ns_per_iter": 72151000,
+      "deviation_ns": 964500
+    },
+    {
+      "id": "serde_serialize/serde_saphyr/large",
+      "group": "serde_serialize",
+      "library": "serde_saphyr",
+      "fixture": "large",
+      "ns_per_iter": 52503000,
+      "deviation_ns": 1108000
+    }
+  ]
+}

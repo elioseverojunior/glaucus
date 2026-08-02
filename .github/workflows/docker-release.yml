@@ -1,0 +1,145 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Docker Release
+
+# Grouped by tag/ref, not by workflow: a release tag is only ever built once,
+# so there is nothing legitimate to cancel a second run of the SAME tag over.
+concurrency:
+  group: docker-release-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+# `release: published` ONLY, plus a manual escape hatch -- deliberately NOT a
+# push-to-main trigger. `cicd.yml` already publishes to crates.io on every
+# push to main, and a per-commit two-arch image build here would mean a slow
+# emulated arm64 QEMU build and a new ghcr.io tag on every merge, for an
+# artefact that is only ever consumed at a tagged release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Image tag to publish (e.g. v0.0.1-1). Defaults to the workspace version (from Cargo.toml) when omitted -- useful for a manual rebuild of the current commit outside a GitHub Release."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/glaucus
+
+jobs:
+  build-and-push:
+    name: Build & push (${{ matrix.variant }})
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The standard image: fixed uid 10000, root-owned binary. Tagged
+          # plain (`v0.0.1-1`, `latest`).
+          - variant: standard
+            dockerfile: docker/Dockerfile
+            suffix: ""
+          # The rootless / arbitrary-UID variant, published alongside the
+          # standard image rather than left as a build-it-yourself option:
+          # OpenShift and rootless-Podman deployments are a real, common
+          # target for a CLI shipped as a container, and the extra cost here
+          # is one more matrix leg reusing the exact same steps -- not a
+          # second workflow. Tagged with a `-rootless` suffix
+          # (`v0.0.1-1-rootless`, `latest-rootless`) so both variants are
+          # unambiguous and independently pullable.
+          - variant: rootless
+            dockerfile: docker/Dockerfile.rootless
+            suffix: "-rootless"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: "true"
+
+      # `github.event.release.tag_name` is unset on `workflow_dispatch`, so
+      # this falls back to the SAME `sed` this repo's own `mise run
+      # docker:build` task uses against the workspace's virtual-manifest
+      # `Cargo.toml` (`[workspace.package] version = "..."`) -- one place
+      # defines how the version is read, whether that is a human tagging a
+      # release or a manual dispatch off main.
+      - name: Resolve version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+
+          VERSION="${RELEASE_TAG}"
+          if [ -z "${VERSION}" ]; then
+            VERSION="${INPUT_VERSION}"
+          fi
+          if [ -z "${VERSION}" ]; then
+            RAW=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml)
+            VERSION="v${RAW:-0.1.0}"
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          # `APP_VERSION` (the Dockerfile's build-arg) mirrors what `mise run
+          # docker:build` feeds it locally: a bare SemVer read from
+          # `Cargo.toml`, no leading `v`. Tags keep the `v` -- that matches
+          # this repo's git tag convention (`push: tags: ["v*"]` in
+          # publish.yml) -- so the two are stripped independently here rather
+          # than reusing one value for both.
+          echo "app-version=${VERSION#v}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      # `flavor: suffix=...` appends `-rootless` to EVERY tag this produces,
+      # including `latest` -> `latest-rootless` -- so the two matrix legs
+      # never collide on a tag, and the standard leg (empty suffix) is
+      # unaffected.
+      - name: Derive image metadata
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          flavor: |
+            suffix=${{ matrix.suffix }},onlatest=true
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.app-version }}
+          # Scoped per variant: the standard and rootless images share almost
+          # every layer, but keeping separate cache scopes avoids one variant
+          # evicting the other's cache under GitHub's per-repo cache size cap.
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}

@@ -1,0 +1,321 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: "Setup Rust Environment"
+description: "Setup Rust toolchain, cache, and cargo tools in one action"
+inputs:
+  toolchain:
+    description: >
+      Rust toolchain channel. Empty by default so the action reads
+      rust-toolchain.toml, keeping that file the single source of truth. Naming
+      a channel here overrides it for the whole job -- the action exports
+      RUSTUP_TOOLCHAIN, which outranks every rust-toolchain.toml in the tree --
+      so set it only for jobs that genuinely need another channel (nightly).
+    required: false
+    default: ""
+  profile:
+    description: >
+      rustup profile. `minimal` by default, not rustup's own `default`: the
+      difference is rust-docs, 902 MB of offline std documentation that no job
+      here reads. Everything the gates need is requested as a component instead.
+    required: false
+    default: "minimal"
+  components:
+    description: >
+      EXTRA rustup components, added to the clippy/rustfmt/llvm-tools this
+      action always installs (e.g. rust-src for a nightly job). These add to
+      that set rather than replacing it.
+    required: false
+    default: ""
+  targets:
+    description: "Additional rustup targets (e.g., wasm32-unknown-unknown)"
+    required: false
+    default: ""
+  cargo-tools:
+    description: "Space-separated list of cargo tools to install"
+    required: false
+    # cargo-binstall is here for mise's benefit, not ours: mise's `cargo:`
+    # backend shells out to ~/.cargo/bin/cargo-binstall and, finding none on a
+    # runner, falls back to compiling each pinned tool from source -- which is
+    # what made `mise install` take ~9 minutes.
+    #
+    # `cargo-binstall` ALONE, and everything else comes from mise. The `Setup
+    # mise` step below runs a full `mise install`, which provisions every `cargo:`
+    # entry in mise.toml into `~/.local/share/mise/installs/` and puts it on PATH
+    # -- so anything listed here as well was installed twice per job, 15 jobs per
+    # run. A CI log confirms it: `mise/installs/cargo-cargo-audit/0.22.2/bin` on
+    # PATH alongside install-action's copy in `~/.cargo/bin`.
+    #
+    # binstall is the exception because mise's cargo backend looks for it at
+    # `~/.cargo/bin` and falls back to compiling from source when it is missing,
+    # which is what made `mise install` take ~9 minutes. Installing it prebuilt
+    # first is what makes every mise install after it a download.
+    #
+    # mise.toml is therefore the single source of truth for tool versions. A job
+    # needing something outside it still passes that via this input.
+    #
+    # cargo-only. gitleaks belongs to mise.toml's `[tools]` registry section, not
+    # here -- install-action has no manifest entry for it, so listing it failed
+    # the Setup job outright. Anything under `# Binaries from mise registries:`
+    # in mise.toml is mise's to install, not this action's.
+    default: "cargo-binstall"
+  comply-rev:
+    description: >
+      Git revision of elioseverojunior/comply to install. Pinned rather than
+      tracking the default branch so a run is reproducible and the binary cache
+      has something stable to key on. comply IS on crates.io, but only as semver
+      prereleases, which `cargo install` skips -- and its releases carry no
+      binary assets, so cargo-binstall cannot serve it either. Bump this to move
+      it.
+    required: false
+    default: "a4639db7f4a6c509af4f2325a3c513966e6aabe9"
+  ignorefile-rev:
+    description: >
+      Git revision of elioseverojunior/ignorefile to install. Pinned to a rev
+      rather than tracking the default branch so a CI run is reproducible and the
+      binary cache below has something stable to key on. The project publishes no
+      tags yet; bump this to move it.
+    required: false
+    default: "0ad0e20042b173838394c58c768225255afb3955"
+  cache-key-suffix:
+    description: "Additional suffix for cache key specificity"
+    required: false
+    default: ""
+  cache-target:
+    description: "Whether to cache target directory"
+    required: false
+    default: "true"
+  rust-cache-shared-key:
+    description: "Shared key for rust-cache (e.g., 'perf' for benchmarks)"
+    required: false
+    default: ""
+  rust-cache-save-if:
+    description: "Condition for rust-cache to save (e.g., github.ref == 'refs/heads/main')"
+    required: false
+    default: ""
+
+outputs:
+  cache-hit:
+    description: "Whether the Rust cache was restored (exact match)"
+    value: ${{ steps.rust-cache.outputs.cache-hit }}
+  cache-key:
+    description: "The computed cache key passed to Swatinem/rust-cache"
+    value: ${{ steps.cache-names.outputs.cache-key }}
+  cache-shared-key:
+    description: "The computed shared key passed to Swatinem/rust-cache"
+    value: ${{ steps.cache-names.outputs.cache-shared-key }}
+  rust-version:
+    description: "The installed Rust toolchain version (e.g. 'rustc 1.88.0 (a1b2c3d4e 2025-07-14)')"
+    value: ${{ steps.rust-version.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: GitHub Actions Bot Configuration
+      uses: ./.github/actions/bot-setup
+
+    # .cargo/config.toml pins `-fuse-ld=mold` for x86_64-unknown-linux-gnu with
+    # no fallback, so mold is a hard requirement for ANY cargo invocation there,
+    # not the optimisation its comment implies. It belongs here rather than in
+    # one workflow: it used to be installed only by cicd.yml's `quick` job, so
+    # every other compiling job failed with
+    # `clang: error: invalid linker name in argument '-fuse-ld=mold'`.
+    # Caches the .deb, not the installed files: mold's dependencies (libc6,
+    # libgcc-s1, libstdc++6, zlib1g) are all base-system packages present on any
+    # runner, so `dpkg -i` needs no dependency resolution and the cache stays a
+    # couple of megabytes.
+    - name: Cache mold package
+      id: mold-cache
+      if: runner.os == 'Linux' && runner.arch == 'X64'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/mold-deb
+        key: mold-deb-${{ runner.os }}-${{ runner.arch }}
+
+    - name: Install mold (required by .cargo/config.toml on Linux)
+      if: runner.os == 'Linux' && runner.arch == 'X64'
+      shell: bash
+      run: |
+        if command -v mold >/dev/null 2>&1; then
+          exit 0
+        fi
+
+        mkdir -p "$HOME/.cache/mold-deb"
+        # `apt-get update` is the expensive half of this step, so it runs only
+        # when the package is not already cached.
+        if ! ls "$HOME/.cache/mold-deb"/mold_*.deb >/dev/null 2>&1; then
+          sudo apt-get update
+          (cd "$HOME/.cache/mold-deb" && apt-get download mold)
+        fi
+        sudo dpkg -i "$HOME/.cache/mold-deb"/mold_*.deb
+
+    # `minimal` plus exactly what the gates use, rather than `default`: the
+    # default profile installs rust-docs, which is 902 MB of a 1.7 GB toolchain
+    # and which no CI job opens. Not installing it beats caching it -- a
+    # ~/.rustup cache would have traded a 26s install for restoring a multi-
+    # gigabyte archive, and eaten most of the 10 GB per-repo cache budget that
+    # the cargo-bin and target caches actually earn their place in.
+    #
+    # A caller's `components` ADD to this set; they do not replace it. A job that
+    # asks for an extra component would otherwise be left without clippy or
+    # rustfmt for the gates that follow.
+    - name: Resolve toolchain components
+      id: components
+      shell: bash
+      env:
+        EXTRA: ${{ inputs.components }}
+      run: |
+        list="clippy,rustfmt,llvm-tools"
+        if [ -n "$EXTRA" ]; then
+          list="${list},${EXTRA}"
+        fi
+        echo "list=${list}" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Rust toolchain
+      id: rust-toolchain
+      uses: elioseverojunior/rust-toolchain@365ab4286518f5f3d13c12ed638024bdc86f413b # v0.3.0-1
+      with:
+        toolchain: ${{ inputs.toolchain }}
+        profile: ${{ inputs.profile }}
+        components: ${{ steps.components.outputs.list }}
+        targets: ${{ inputs.targets }}
+
+    - name: Get Rust version
+      id: rust-version
+      shell: bash
+      run: echo "version=$(rustc --version)" >> "$GITHUB_OUTPUT"
+
+    - name: Compute cache key
+      id: cache-names
+      shell: bash
+      # Through the environment, not `${{ }}` interpolation: the tool list is an
+      # action input, and expanding one straight into a shell body is the
+      # script-injection shape GitHub warns about.
+      env:
+        CARGO_TOOLS: ${{ inputs.cargo-tools }}
+        IGNOREFILE_REV: ${{ inputs.ignorefile-rev }}
+        COMPLY_REV: ${{ inputs.comply-rev }}
+      run: |
+        cache_key="cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-key-suffix }}-${{ hashFiles('**/Cargo.lock') }}"
+        echo "cache-key=${cache_key}" >> "$GITHUB_OUTPUT"
+        shared_key="${{ inputs.rust-cache-shared-key || steps.rust-toolchain.outputs.name }}"
+        echo "cache-shared-key=${shared_key}" >> "$GITHUB_OUTPUT"
+
+        # `hashFiles` reads files, and the tool list is a string, so the key for
+        # the binary cache is hashed here instead. Keying on the list means
+        # adding or removing a tool invalidates it and nothing else does; the
+        # toolchain is in the key because the binaries sit alongside rustup's
+        # own shims in the same directory.
+        if command -v sha256sum >/dev/null 2>&1; then
+          tools_hash="$(printf '%s' "$CARGO_TOOLS" | sha256sum)"
+        else
+          tools_hash="$(printf '%s' "$CARGO_TOOLS" | shasum -a 256)"
+        fi
+        # The ISO week bounds staleness. Every tool is requested `@latest`, and
+        # the install step is skipped outright on a cache hit, so without a
+        # rotating component a hit would pin these binaries forever. One slow
+        # run a week buys a predictable refresh.
+        # Both git-source revs are in the key: this cache carries the ignorefile
+        # AND comply binaries, and their install steps are skipped on a hit. A
+        # key that named only one would keep serving a stale build of the other
+        # after its pin moved.
+        if command -v sha256sum >/dev/null 2>&1; then
+          revs_hash="$(printf '%s-%s' "$IGNOREFILE_REV" "$COMPLY_REV" | sha256sum)"
+        else
+          revs_hash="$(printf '%s-%s' "$IGNOREFILE_REV" "$COMPLY_REV" | shasum -a 256)"
+        fi
+        bin_key="cargo-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.name }}-${tools_hash:0:16}-${revs_hash:0:16}-$(date -u +%G%V)"
+        echo "cargo-bin-key=${bin_key}" >> "$GITHUB_OUTPUT"
+
+    - name: Setup Rust cache
+      id: rust-cache
+      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      with:
+        cache-on-failure: true
+        save-if: ${{ inputs.cache-target == 'true' && (inputs.rust-cache-save-if == '' || inputs.rust-cache-save-if) }}
+        # `~/.cargo/bin` is handled by the dedicated step below instead. On save,
+        # rust-cache's `cleanBin` deletes every file in that directory absent
+        # from `.crates.toml`/`.crates2.json`, and neither install-action nor
+        # cargo-binstall registers there -- `.crates2.json` stays empty while 39
+        # binaries sit on disk. So the tools were erased from the cache on every
+        # save, and an EXACT cache hit still reinstalled all 21 of them.
+        cache-bin: "false"
+        # The resolved channel, not the input: with `toolchain` empty the input
+        # would yield a blank shared-key, and every job would fall back to
+        # keying on its own job_id instead of sharing one cache.
+        shared-key: ${{ steps.cache-names.outputs.cache-shared-key }}
+        key: ${{ steps.cache-names.outputs.cache-key }}
+
+    # Restored BEFORE the install step, so install-action finds the binaries
+    # already present and resolves rather than re-downloads.
+    - name: Cache cargo tool binaries
+      id: cargo-bin
+      if: ${{ inputs.cargo-tools != '' }}
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cargo/bin
+        key: ${{ steps.cache-names.outputs.cargo-bin-key }}
+
+    # Skipped outright on a cache hit. install-action does not consult the
+    # filesystem: asked for `cargo-audit@latest` it prints `info: installing`
+    # and downloads, whatever is already in `~/.cargo/bin`. Restoring the cache
+    # alone therefore changed nothing -- the binaries were present and all 21
+    # were fetched again regardless. The hit itself has to gate the step.
+    # hk.pkl's `gitignore` step runs `mise run gitignore:check`, and cicd.yml's lint
+    # job runs `hk check --all` -- so without this the gate fails with
+    # `ignorefile: command not found`. Not in mise.toml's [tools] because mise's
+    # cargo backend emits a bare `cargo install --git=<url>` with no package
+    # selector, which cargo rejects with "multiple packages with binaries found";
+    # mise.toml documents that at `ignorefile:install`.
+    #
+    # Only the CLI: the LSP and MCP binaries are for an editor, and this is a
+    # source build, so each one omitted is a compile skipped. Guarded by the same
+    # cache hit as the tools above, and lands in the same `~/.cargo/bin` the
+    # cache carries.
+    - name: Install ignorefile (from source; no release binaries published)
+      if: ${{ steps.cargo-bin.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        REV: ${{ inputs.ignorefile-rev }}
+      run: |
+        set -Eeuo pipefail
+        cargo install --locked \
+          --git https://github.com/elioseverojunior/ignorefile \
+          --rev "${REV}" \
+          ignorefile-cli
+
+    # Same reasoning as ignorefile above, and the same guard. comply drives
+    # hk.pkl's `comply`, `comply-fix` and `comply-format` steps, which cicd.yml's
+    # lint job reaches through `hk check --all`; without it that gate fails with
+    # `comply: command not found`.
+    #
+    # It used to sit in mise.toml's [tools] as a `cargo:` git entry. cargo-binstall
+    # cannot serve a git source, so `mise install` compiled it from scratch in
+    # every job -- around 3.5 minutes each. Run 30706537351 spent 7m19s inside
+    # `mise install --locked` and was cancelled still compiling. Installed here it
+    # is built once per cache miss instead of once per job.
+    - name: Install comply (git source; no binstallable release assets)
+      if: ${{ steps.cargo-bin.outputs.cache-hit != 'true' }}
+      shell: bash
+      env:
+        REV: ${{ inputs.comply-rev }}
+      run: |
+        set -Eeuo pipefail
+        cargo install --locked \
+          --git https://github.com/elioseverojunior/comply \
+          --rev "${REV}" \
+          comply
+
+    - name: Install cargo tools
+      if: ${{ inputs.cargo-tools != '' && steps.cargo-bin.outputs.cache-hit != 'true' }}
+      uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+      with:
+        tool: |
+          ${{ inputs.cargo-tools }}
+
+    - name: Setup mise
+      uses: jdx/mise-action@7e36c90d9ab29c415a2384db3006f3ec8a8cc654 # v4.2.4
+      with:
+        cache_key_prefix: mise
+        cache_key: mise-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/mise.lock') || hashFiles('**/mise.toml') }}

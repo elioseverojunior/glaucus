@@ -1,0 +1,82 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+authors.workspace = true
+categories.workspace = true
+description = "Fuzzing targets for the glaucus YAML library"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "glaucus-fuzz"
+# Bin-only cargo-fuzz harness: nothing here is consumable as a dependency, and
+# publishing would ship the seed corpus plus a libfuzzer-sys (NCSA) edge that
+# only deny.toml's per-crate exception tolerates. Matches glaucus-bench and
+# glaucus-yaml-test-suite.
+publish = false
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+glaucus-ast = { workspace = true }
+glaucus-core = { workspace = true }
+glaucus-cst = { workspace = true }
+glaucus-serde = { workspace = true }
+libfuzzer-sys = { version = ">=0.4" }
+
+[[bin]]
+doc = false
+name = "fuzz_scanner"
+path = "fuzz_targets/fuzz_scanner.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_parser"
+path = "fuzz_targets/fuzz_parser.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_round_trip"
+path = "fuzz_targets/fuzz_round_trip.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_limits"
+path = "fuzz_targets/fuzz_limits.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_serde"
+path = "fuzz_targets/fuzz_serde.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_cst_roundtrip"
+path = "fuzz_targets/fuzz_cst_roundtrip.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_lossless_edit"
+path = "fuzz_targets/fuzz_lossless_edit.rs"
+test = false
+
+[[bin]]
+doc = false
+name = "fuzz_merge_keys"
+path = "fuzz_targets/fuzz_merge_keys.rs"
+test = false
+
+[lints]
+workspace = true

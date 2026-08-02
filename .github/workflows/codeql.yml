@@ -1,0 +1,67 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: "CodeQL Analysis"
+
+concurrency:
+  group: codeql-analysis-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+# Schedule only. cicd.yml's `sast` job runs CodeQL on every push and pull request,
+# so keeping those triggers here analysed the same commit twice -- two full
+# database builds per push, for one result. What that job cannot provide is this
+# cron: a weekly scan re-runs the current queries against unchanged code, which
+# is how a newly published query finds an old vulnerability. `workflow_dispatch`
+# stays so the scan can be triggered by hand without waiting for Sunday.
+on:
+  schedule:
+    - cron: '0 12 * * 0'
+  workflow_dispatch:
+
+# Read-only at the top level. The `analyze` job below declares the exact same
+# set it always did, and a job's `permissions` block replaces the workflow
+# default rather than narrowing it -- so nothing loses access. A top-level
+# write is what scored Token-Permissions 0: OpenSSF Scorecard treats any
+# workflow-wide write as granting it to every job, whether or not they use it.
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: CodeQL Analysis
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # `actions` alongside `rust`: a CodeQL configuration for the actions
+        # language already exists on this repo, and with nothing analysing it the
+        # status page reports a configuration that never receives results. It also
+        # earns its place -- it scans the workflows themselves for script
+        # injection, which is the class of bug this repo has 8 workflows' worth of
+        # surface for.
+        language: [rust, actions]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        with:
+          languages: ${{ matrix.language }}
+          queries: +security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+        with:
+          category: "/language:${{ matrix.language }}"

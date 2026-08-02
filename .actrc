@@ -1,0 +1,11 @@
+--platform=ubuntu-latest=catthehacker/ubuntu:full-latest
+--pull=false
+--artifact-server-path=/tmp/act/artifacts
+--container-architecture=linux/amd64
+--env=CARGO_TERM_COLOR=always
+--eventpath=./.act/event.json
+--secret-file=./.act/.secrets
+--var-file=./.act/.vars
+--detect-event
+--use-gitignore
+--use-new-action-cache

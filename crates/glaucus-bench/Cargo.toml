@@ -1,0 +1,70 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+authors.workspace = true
+categories.workspace = true
+description = "Benchmarking suite for the glaucus YAML library"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "glaucus-bench"
+publish = false
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+glaucus = { workspace = true, features = ["ast", "serde"] }
+glaucus-ast.workspace = true
+glaucus-core.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+criterion = { version = "0.8.2", features = ["html_reports"] }
+noyalib = { version = ">=0.0.7" }
+rust-yaml = { version = ">=1" }
+serde-saphyr = { version = ">=0.0.27" }
+serde_json.workspace = true
+serde_yaml_ng = { version = ">=0.10" }
+yaml-rust2 = { version = ">=0.11.0" }
+
+# The library target has no #[bench] functions, but `cargo bench`
+# invokes its default libtest harness anyway and forwards `--` args
+# to it. Forwarding `--output-format bencher` (the flag Criterion
+# accepts) breaks the libtest harness ("error: Unrecognized option:
+# 'output-format'") and aborts the whole `cargo bench` run before
+# any Criterion target runs. Disabling bench on the lib target
+# routes `cargo bench -p glaucus-bench` straight to the [[bench]]
+# targets below, all of which set harness = false and use Criterion.
+[lib]
+bench = false
+
+[lints]
+workspace = true
+
+[[bench]]
+harness = false
+name = "scanner"
+
+[[bench]]
+harness = false
+name = "parser"
+
+[[bench]]
+harness = false
+name = "composer"
+
+[[bench]]
+harness = false
+name = "emitter"
+
+[[bench]]
+harness = false
+name = "serde"
+
+[[bench]]
+harness = false
+name = "end_to_end"

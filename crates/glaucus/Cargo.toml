@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+# Integration tests are developed in-repo but stripped from the published
+# .crate: they exercise this workspace, not the packaged library, and a
+# consumer building from the registry has no reason to compile them.
+authors.workspace = true
+categories.workspace = true
+description = "Safe YAML for Rust — zero unsafe by default, full YAML 1.2.2 spec compliance, high performance"
+edition.workspace = true
+exclude.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "glaucus"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[package.metadata.docs.rs]
+# docs.rs reads this per package; there is no workspace-level form and
+# `package.metadata` is not inheritable, so every published crate repeats it.
+# Feature-gated items are invisible without `all-features`.
+all-features = true
+# Nightly-only rustdoc flag, which is fine: docs.rs builds on nightly.
+# `--document-private-items` is deliberately NOT set — internals belong in a
+# local `cargo doc`, not in the crate's public documentation.
+rustdoc-args = ["--generate-link-to-definition"]
+
+# cargo-machete reads `src/` only, so a dependency used exclusively by `build.rs`
+# reads as unused. chrono is one: it stamps the build timestamp and never
+# appears in `src/`.
+[package.metadata.cargo-machete]
+ignored = ["chrono"]
+
+[features]
+ast = ["dep:glaucus-ast"]
+cli = [
+  "ast",
+  "cst",
+  "schema",
+  "serde",
+  "dep:anstream",
+  "dep:anyhow",
+  "dep:clap",
+  "dep:clap_complete",
+  "dep:serde_json",
+  "dep:toml",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:unicode-width",
+]
+cst = ["dep:glaucus-cst"]
+default = ["ast", "serde", "cst"]
+schema = ["dep:glaucus-schema", "ast", "cst"]
+serde = ["dep:glaucus-serde", "ast"]
+
+[dependencies]
+anstream = { workspace = true, optional = true }
+anyhow = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+clap_complete = { workspace = true, optional = true }
+glaucus-ast = { workspace = true, optional = true }
+glaucus-core.workspace = true
+glaucus-cst = { workspace = true, optional = true }
+glaucus-schema = { workspace = true, optional = true }
+glaucus-serde = { workspace = true, optional = true }
+serde.workspace = true
+serde_json = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
+unicode-width = { workspace = true, optional = true }
+
+[build-dependencies]
+chrono = { workspace = true }
+
+[[bin]]
+name = "glaucus"
+path = "src/main.rs"
+required-features = ["cli"]
+
+[lints]
+workspace = true

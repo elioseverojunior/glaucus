@@ -1,0 +1,61 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Configuration for GitHub auto-generated release notes
+# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+#
+# Categories are limited to the labels `.github/labeler.yml` actually applies,
+# which are all PATH-based. The semantic set this replaced (Features, Bug Fixes,
+# Performance, Refactoring, ...) keyed on `type:*` labels from
+# `bcoe/conventional-release-labels`, which derives them from PULL REQUEST TITLES
+# -- and this repository is pushed to directly, so that action never runs and
+# every one of those categories was permanently empty.
+#
+# To get semantic grouping back, adopt pull requests; the labelling workflow is
+# already wired for it. Until then a category here can only describe WHERE a
+# change landed, not what kind of change it was.
+
+changelog:
+  exclude:
+    # Applied by hand, not by labeler -- kept because a human can still reach for
+    # them on a release that should not appear in the notes.
+    labels:
+      - skip-changelog
+      - duplicate
+      - invalid
+    authors:
+      - dependabot
+      - dependabot[bot]
+
+  categories:
+    - title: 🦀 Library and CLI
+      labels:
+        - source
+
+    - title: 📦 Dependencies
+      labels:
+        - dependencies
+
+    - title: 📚 Documentation
+      labels:
+        - documentation
+
+    - title: 👷 CI/CD
+      labels:
+        - ci
+        - github-actions
+
+    - title: 🔧 Configuration
+      labels:
+        - config
+
+    - title: 🧪 Fuzzing
+      labels:
+        - fuzz
+
+    # Anything labeller missed, so a change is never silently dropped from the
+    # notes just because no path glob claimed it.
+    - title: 🔨 Other changes
+      labels:
+        - "*"

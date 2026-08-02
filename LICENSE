@@ -1,0 +1,57 @@
+comply
+Copyright (c) COMPLY contributors
+
+This project is dual-licensed. You may use it under the terms of either
+license below, at your option:
+
+  * Apache License, Version 2.0
+    Full text: LICENSE-APACHE (a symlink to LICENSES/Apache-2.0.txt)
+    Online:    https://www.apache.org/licenses/LICENSE-2.0
+
+  * MIT License
+    Full text: LICENSE-MIT (a symlink to LICENSES/MIT.txt)
+    Online:    https://opensource.org/licenses/MIT
+
+You are not required to comply with both. Choose whichever you prefer.
+
+The corresponding SPDX expression, as declared in Cargo.toml and in the
+per-file headers, is:
+
+    MIT OR Apache-2.0
+
+Why two licenses
+----------------
+
+Apache-2.0 grants everything MIT does and adds an explicit patent grant
+(section 3), which protects downstream users from patent litigation by
+contributors. MIT is shorter and more permissive about attribution. Offering
+both is the Rust ecosystem convention, so comply composes without friction
+with the crates around it.
+
+Documentation
+-------------
+
+Documentation is licensed separately, under the Creative Commons Attribution
+3.0 Unported license or any later version (CC-BY-3.0+). Full text:
+CC-BY-3.0.txt (a symlink to LICENSES/CC-BY-3.0.txt).
+
+Creative Commons is the standard for prose rather than code, and a separate
+documentation license is required by the OpenSSF CII Best Practices badge.
+
+Contribution
+------------
+
+Unless you state otherwise, any contribution you intentionally submit for
+inclusion in this work, as defined in the Apache-2.0 license, shall be
+dual-licensed as above, with no additional terms or conditions.
+
+Contributions are certified under the Developer Certificate of Origin; see
+DCO.txt and CONTRIBUTING.md.
+
+Per-file licensing
+------------------
+
+Every file in this repository declares its own licensing, either in an SPDX
+header or through an annotation in REUSE.toml, following the REUSE
+Specification. Run `comply lint` to verify, or consult REUSE.toml for the
+aggregate rules.

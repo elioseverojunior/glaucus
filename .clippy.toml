@@ -1,0 +1,26 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Clippy configuration for Glaucus
+# Safety-first YAML library — tighter thresholds for auditable, correct code
+
+# Flag wildcard imports that reduce code clarity
+warn-on-all-wildcard-imports = true
+
+# Maximum cognitive complexity per function — lower threshold for auditability
+# Scanner/parser state machines may need targeted allows, but default should be tight
+cognitive-complexity-threshold = 20
+
+# Allow enum variants to share a prefix (ErrorKind has many related variants)
+enum-variant-name-threshold = 5
+
+# Max function arguments — Glaucus types are simple, keep this reasonable
+too-many-arguments-threshold = 6
+
+# Type complexity — keep low for readable, auditable type signatures
+type-complexity-threshold = 300
+
+# Allow panicking in tests (unwrap/expect) but forbid in production code
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

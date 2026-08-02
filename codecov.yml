@@ -1,0 +1,105 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+---
+# Codecov configuration ~ https://docs.codecov.com/docs/codecov-yaml
+#
+# Coverage is produced by cargo-tarpaulin (llvm engine, Tests + Doctests) as a
+# Cobertura report (cobertura.xml) and uploaded under the `tarpaulin` flag — see
+# the `coverage` / `codecov` mise tasks and .github/workflows/ci.yml. The project
+# enforces a non-negotiable 100% line-coverage gate (CLAUDE.md); this file mirrors
+# that policy and breaks coverage down per workspace crate for codebase analysis.
+
+codecov:
+  require_ci_to_pass: true
+  notify:
+    # One coverage job uploads a single report — notify once it lands.
+    after_n_builds: 1
+    wait_for_ci: true
+
+coverage:
+  precision: 2
+  round: down
+  range: "90...100"
+  status:
+    project:
+      default:
+        target: 100%   # match the tarpaulin --fail-under 100 gate
+        threshold: 0%   # no regression tolerated
+        flags:
+          - tarpaulin
+    patch:
+      default:
+        target: 100%   # every new or changed line must be covered
+        threshold: 0%
+        flags:
+          - tarpaulin
+    changes: false
+
+# Per-crate breakdown — the "codebase analysis" view in the Codecov dashboard.
+# Component statuses are informational: the workspace-level project status above
+# and the tarpaulin CI gate are the blocking checks, so these add per-crate
+# visibility without spamming a required check for every crate on each PR.
+component_management:
+  default_rules:
+    flag_regexes:
+      - tarpaulin
+    statuses:
+      - type: project
+        target: 100%
+        threshold: 0%
+        informational: true
+  individual_components:
+    - component_id: glaucus
+      name: glaucus (facade)
+      paths:
+        - crates/glaucus/**
+    - component_id: glaucus-core
+      name: glaucus-core
+      paths:
+        - crates/glaucus-core/**
+    - component_id: glaucus-ast
+      name: glaucus-ast
+      paths:
+        - crates/glaucus-ast/**
+    - component_id: glaucus-cst
+      name: glaucus-cst
+      paths:
+        - crates/glaucus-cst/**
+    - component_id: glaucus-serde
+      name: glaucus-serde
+      paths:
+        - crates/glaucus-serde/**
+    - component_id: glaucus-schema
+      name: glaucus-schema
+      paths:
+        - crates/glaucus-schema/**
+    - component_id: glaucus-wasm
+      name: glaucus-wasm
+      paths:
+        - crates/glaucus-wasm/**
+
+flags:
+  tarpaulin:
+    paths:
+      - crates/
+    carryforward: false
+
+# Files Codecov leaves out of the denominator. These mirror the tarpaulin
+# exclude set (host-untestable entry/ABI boilerplate) plus the fuzz crate and
+# vendored corpus, which are not measured at all — so Codecov's total matches
+# the tarpaulin gate exactly.
+ignore:
+  - "crates/*/src/main.rs"                  # CLI entry points (argv/stdin/exit)
+  - "crates/glaucus-wasm/src/lib.rs"          # wasm-bindgen ABI glue
+  - "crates/glaucus-fuzz/**"                  # own workspace; not a coverage target
+  - "crates/glaucus-yaml-test-suite/data/**"  # vendored YAML conformance corpus
+
+comment:
+  layout: "header, diff, flags, components, files, footer"
+  behavior: default
+  require_changes: false
+
+github_checks:
+  annotations: true

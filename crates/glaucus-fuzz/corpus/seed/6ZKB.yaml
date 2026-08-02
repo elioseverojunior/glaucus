@@ -1,0 +1,11 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+Document
+---
+# Empty
+...
+%YAML 1.2
+---
+matches %: 20

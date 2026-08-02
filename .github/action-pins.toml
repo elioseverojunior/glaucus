@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# ---------------------------------------------------------------------------
+# comply action-pins configuration
+# ---------------------------------------------------------------------------
+# Place this file in .github/action-pins.toml (or .yaml / .json) to
+# customize the behaviour of scripts/update-actions-pins.py.
+#
+# Values here are shallow-merged over the built-in defaults:
+# every key you set fully replaces the default for that key.
+#
+# Supported formats: TOML, YAML (requires pyyaml), JSON.
+# Auto-detection order: .github/ -> repo root.
+#
+# Usage:
+#   python3 scripts/update-actions-pins.py                 # auto-detect
+#   python3 scripts/update-actions-pins.py --print-config  # inspect effective config
+# ---------------------------------------------------------------------------
+
+# Actions that resolve to a branch tip instead of a release tag.
+# Key   = "owner/repo"
+# Value = list of valid branch names (first is the default).
+#
+# Empty: every action this repo uses publishes release tags. The Rust toolchain
+# action is elioseverojunior/rust-toolchain, which tags releases, so it must NOT
+# be listed here -- it has no `stable`/`nightly` branches to resolve against.
+# The predecessor dtolnay/rust-toolchain did belong here: it cuts no releases
+# and is referenced by branch instead.
+branch_only_repos = {}
+
+# Branch-name aliases used in ``uses: owner/repo@<name>`` lines.
+# When a ref matches a key here, the corresponding value is resolved
+# as the actual branch on the remote.
+branch_overrides = { "nightly" = "nightly" }
+
+# Actions whose latest release tag does NOT follow semver.
+# Key   = "owner/repo"
+# Value = tag or branch ref to resolve against (e.g. ``"v3"``).
+ref_overrides = { "github/codeql-action" = "v4" }
+
+# Paths (relative to repo root) of reusable workflow references
+# that should be treated as external dependencies.
+reusable_paths = [
+  "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml",
+]
+
+# Max concurrent GitHub API requests.  Lower if you hit secondary
+# rate limits, raise if you have a high token bucket.
+max_concurrent_api = 10

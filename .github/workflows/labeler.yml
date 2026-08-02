@@ -1,0 +1,121 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Labeler
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  label-files:
+    name: Label by files
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      - name: Label PR based on file paths
+        uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN || github.token }}
+          sync-labels: true
+
+  label-conventional-commits:
+    name: Label by conventional commits
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Label PR based on conventional commit title
+        uses: bcoe/conventional-release-labels@886f696738527c7be444262c327c89436dfb95a8 # v1.3.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+          type_labels: |
+            {
+              "feat": "type:feature",
+              "fix": "type:bugfix",
+              "docs": "type:documentation",
+              "style": "type:style",
+              "refactor": "type:refactor",
+              "perf": "type:performance",
+              "test": "type:test",
+              "build": "type:build",
+              "ci": "type:ci",
+              "chore": "type:chore",
+              "revert": "type:revert",
+              "init": "type:init"
+            }
+          ignored_types: "[]"
+
+  label-semver-bump:
+    name: Label version bump (GitVersion)
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    steps:
+      - name: Determine version bump
+        id: bump
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # GitVersion patterns (matching GitVersion.yml)
+          # Major: breaking change (! before :) or BREAKING CHANGE:
+          if [[ "$TITLE" =~ ^(feat|fix|refactor|perf|build|ci|chore|docs|style|test)(\(.+\))?!: ]] || [[ "$TITLE" =~ ^BREAKING[\ -]CHANGE: ]]; then
+            echo "bump=major" >> "$GITHUB_OUTPUT"
+          # Minor: feat
+          elif [[ "$TITLE" =~ ^feat(\(.+\))?: ]]; then
+            echo "bump=minor" >> "$GITHUB_OUTPUT"
+          # Patch: fix
+          elif [[ "$TITLE" =~ ^fix(\(.+\))?: ]]; then
+            echo "bump=patch" >> "$GITHUB_OUTPUT"
+          # No bump: docs, style, refactor, perf, test, build, ci, chore
+          elif [[ "$TITLE" =~ ^(docs|style|refactor|perf|test|build|ci|chore|init)(\(.+\))?: ]]; then
+            echo "bump=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "bump=unknown" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Remove existing bump labels
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+
+            const bumpLabels = ['bump:major', 'bump:minor', 'bump:patch', 'bump:none'];
+
+            for (const label of bumpLabels) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number,
+                  name: label
+                });
+              } catch (e) {
+                // Label doesn't exist, ignore
+              }
+            }
+
+      - name: Add version bump label
+        if: steps.bump.outputs.bump != 'unknown'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const bump = '${{ steps.bump.outputs.bump }}';
+
+            await github.rest.issues.addLabels({
+              owner,
+              repo,
+              issue_number,
+              labels: [`bump:${bump}`]
+            });

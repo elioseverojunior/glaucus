@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[submodule "crates/glaucus-yaml-test-suite/data"]
+	path = crates/glaucus-yaml-test-suite/data
+	url = https://github.com/yaml/yaml-test-suite.git
+	branch = data

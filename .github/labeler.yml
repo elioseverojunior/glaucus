@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Configuration for actions/labeler
+# https://github.com/actions/labeler
+#
+# Rewritten for this workspace; it was carried over from a TypeScript project and
+# keyed on paths that do not exist here (`src/**`, `dist/**`, `tsconfig*.json`,
+# `**/*.spec.ts`). Label names must match the ones .github/publish.yml groups on.
+
+source:
+  - changed-files:
+      - any-glob-to-any-file: "crates/*/src/**/*.rs"
+
+# No path-based `tests` label. Tests in this repo are inline `#[cfg(test)] mod
+# tests` blocks in the same file as the code they cover -- there is no `tests/`
+# directory, so any glob would either miss every test or match all of `source`.
+# The fuzz targets are the one exception.
+fuzz:
+  - changed-files:
+      - any-glob-to-any-file: "fuzz/**/*"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "*.md"
+          - "docs/**/*"
+          - "LICENSES/**/*"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/**/*"
+          - "cliff.toml"
+          - "committed.toml"
+          - "commit-types.toml"
+          - "GitVersion.yml"
+          - "hk.pkl"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "Cargo.toml"
+          - "Cargo.lock"
+          - "crates/*/Cargo.toml"
+          - "docs/package.json"
+          - "docs/bun.lock"
+          - "supply-chain/**/*"
+
+# Anything that changes how the crate is built or gated, as distinct from the
+# crate's own dependencies above.
+config:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".cargo/config.toml"
+          - "rust-toolchain.toml"
+          - "rustfmt.toml"
+          - ".clippy.toml"
+          - "deny.toml"
+          - ".taplo.toml"
+          - "tarpaulin.toml"
+          - "tomlfmt.toml"
+          - ".rumdl.toml"
+          - ".yamllint"
+          - "mise.toml"
+          - "REUSE.toml"
+
+github-actions:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/actions/**/action.yml"
+          - ".github/workflows/**/*.yml"

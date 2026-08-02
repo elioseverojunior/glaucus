@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+# Integration tests are developed in-repo but stripped from the published
+# .crate: they exercise this workspace, not the packaged library, and a
+# consumer building from the registry has no reason to compile them.
+authors.workspace = true
+categories.workspace = true
+description = "Serde integration for the glaucus YAML library"
+edition.workspace = true
+exclude.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "glaucus-serde"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[package.metadata.docs.rs]
+# docs.rs reads this per package; there is no workspace-level form and
+# `package.metadata` is not inheritable, so every published crate repeats it.
+# Feature-gated items are invisible without `all-features`.
+all-features = true
+# Nightly-only rustdoc flag, which is fine: docs.rs builds on nightly.
+# `--document-private-items` is deliberately NOT set — internals belong in a
+# local `cargo doc`, not in the crate's public documentation.
+rustdoc-args = ["--generate-link-to-definition"]
+
+[dependencies]
+glaucus-ast.workspace = true
+glaucus-core.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

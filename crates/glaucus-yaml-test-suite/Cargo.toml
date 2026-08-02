@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+authors.workspace = true
+categories.workspace = true
+description = "YAML test suite integration for glaucus (dev-only, not published)"
+edition.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "glaucus-yaml-test-suite"
+publish = false
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+glaucus = { workspace = true, features = ["cst"] }
+glaucus-core.workspace = true
+
+[[test]]
+name = "yaml_test_suite"
+path = "tests/yaml_test_suite.rs"
+
+[[test]]
+name = "round_trip_fidelity"
+path = "tests/round_trip_fidelity.rs"
+
+[lints]
+workspace = true

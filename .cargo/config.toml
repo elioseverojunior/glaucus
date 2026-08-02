@@ -1,0 +1,93 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Custom alias commands shortcuts
+[alias]
+b = "build"
+c = "check"
+t = "test"
+
+[build]
+# Workspace warning gate. `-D warnings` turns every rustc lint into a hard error
+# when compiling a WORKSPACE crate (build / test / clippy / check, locally and in
+# CI). Cargo passes `--cap-lints allow` to registry & git dependencies, so this
+# never fails on third-party crates — only on our own code.
+#
+# This replaces the `RUST_FLAGS: "-D warnings"` that used to sit in cicd.yml:
+# `RUST_FLAGS` is not a real variable (the env var is `RUSTFLAGS`), so that gate
+# was a silent no-op. Centralizing it here fixes the typo and de-duplicates it.
+#
+# To make this CI-only instead (e.g. if warnings-as-errors is too aggressive for
+# local/IDE iteration), delete this line and set `RUSTFLAGS: -D warnings` in the
+# CI workflow env instead.
+# `target-cpu=native` is deliberately NOT here. Cargo REPLACES `[build]
+# rustflags` with `[target.<triple>] rustflags` rather than merging them, and
+# every triple built here has an override below -- so the flag never reached a
+# local or CI build anyway. Where it WOULD have applied is any triple without an
+# override, which is exactly the set a release matrix adds
+# (`*-unknown-linux-musl`, `*-pc-windows-msvc`): those would be compiled for the
+# build machine's CPU and can abort with SIGILL on an older one. Native tuning is
+# a per-machine choice, so it belongs in a developer's own `RUSTFLAGS`, never in
+# committed config that a release build inherits.
+rustflags = ["-D", "warnings"]
+
+# Documentation lint gate: promotes rustdoc lints (broken_intra_doc_links,
+# redundant_explicit_links, bare_urls, invalid_html_tags, …) to hard errors so
+# broken docs fail the build instead of printing an ignorable warning.
+rustdocflags = ["-D", "warnings"]
+
+[env]
+# Ensures the cc crate uses the correct cross-compiler for the target
+CC_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-gcc"
+# Ensures host build-dependencies use your local host compiler
+HOST_CC = "gcc"
+
+[profile.dev]
+debug = true
+incremental = true
+opt-level = 1
+
+# `opt-level = 0` for tests specifically, overriding the `1` that `test` would
+# otherwise inherit from `dev`. This exists for the coverage gate, not for speed.
+#
+# At `opt-level = 1` LLVM merges basic blocks that consist of a single trivial
+# expression, and it makes that decision per backend. `Format::resolve` in
+# `comply-cli/src/output.rs` is four arms each returning a unit variant: every
+# arm is unit-tested, yet tarpaulin reported lines 60, 64 and 66 unexecuted on
+# `x86_64-unknown-linux-gnu` while all four measured as covered on
+# `x86_64-apple-darwin` -- 99.87% in CI against 100.00% locally. Unoptimised, the
+# arms stay distinct blocks and attribution matches the source on both.
+#
+# The comment on `resolve` records an earlier round of the same problem: dropping
+# `const fn` stopped the compiler folding the tests' calls away, but left the
+# block merging that this setting addresses. Tests build slower; a gate whose
+# verdict depends on the host does not tell you anything.
+[profile.test]
+opt-level = 0
+
+[profile.release]
+codegen-units = 1
+debug = false
+lto = "fat"
+# "z" optimizes for binary size; use "3" for max speed instead.
+opt-level = "z"
+panic = "abort" # Optional: removes unwinding logic, saving even more space
+strip = true # Changed to true (removes all unnecessary debug symbols)
+
+# Target-specific linker improvements.
+# macOS ARM (Apple Silicon) — use the system ld64
+[target.aarch64-apple-darwin]
+rustflags = ["-D", "warnings", "-C", "link-arg=-Wl,-dead_strip_dylibs"]
+
+# macOS x86_64
+[target.x86_64-apple-darwin]
+rustflags = ["-D", "warnings", "-C", "link-arg=-Wl,-dead_strip_dylibs"]
+
+# Linux x86_64 — use mold if available for faster linking
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-D", "warnings", "-C", "link-arg=-fuse-ld=mold"]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

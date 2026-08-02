@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Mise
+
+concurrency:
+  group: mise-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+# Paths are the UNION of what the two jobs depend on, because `on: paths` is
+# scoped to the workflow, not to a job -- one list has to serve both.
+#
+# `setup` only cares about mise.toml/mise.lock: Cargo files cannot change whether
+# a pinned tool installs. `coverage-llvm-cov` cares about every `.rs` file, since
+# that is what moves the ratchet -- filtered to manifests alone it would never
+# fire on an ordinary source commit, and would read green because it never ran.
+# The union keeps coverage correct at the cost of running `setup` more often than
+# strictly needed; those are cached installs, so the trade is cheap.
+#
+# `.cargo/config.toml` and `rust-toolchain.toml` are here because both change
+# codegen, and this repo has already seen coverage attribution move with them.
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".cargo/config.toml"
+      - "rust-toolchain.toml"
+      - "mise.toml"
+      - "mise.lock"
+      - ".github/workflows/mise.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".cargo/config.toml"
+      - "rust-toolchain.toml"
+      - "mise.toml"
+      - "mise.lock"
+      - ".github/workflows/mise.yml"
+  workflow_dispatch:
+  # Keeps the Actions caches warm. Two things make this worth a weekly run:
+  # GitHub evicts any cache not ACCESSED in 7 days (a restore counts, so this
+  # need not write anything), and setup-rust-env's cargo-bin key ends in the ISO
+  # week, so it rotates every Monday by design. Without this the first push after
+  # the rollover pays the full tool install (~2m45s measured); 06:00 Monday moves
+  # that cost off a person's push.
+  #
+  # On main deliberately: a cache written here is readable from every branch,
+  # while a cache written on a branch never helps another one.
+  schedule:
+    - cron: "0 6 * * 1"
+
+# Top-level read-all; jobs that upload results need additional write permissions.
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  # mise.toml's [env] defaults GITHUB_TOKEN to '' when unset, and an empty token
+  # sends cargo-binstall down the unauthenticated, rate-limited path.
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+  # Only affects `mise run`, not the `mise install` the setup job exists to do.
+  # cargo-llvm-cov now arrives prebuilt via setup-rust-env, so the coverage task
+  # has no reason to provision anything itself.
+  MISE_TASK_RUN_AUTO_INSTALL: false
+
+jobs:
+  # Proves [tools] and mise.lock still resolve -- nothing else would catch a
+  # broken tool pin.
+  #
+  # The install comes from setup-rust-env, which runs jdx/mise-action without an
+  # `install:` input and so defaults to true; a CI log shows it doing
+  # `mise install --locked`. This job used to add a SECOND mise-action call to
+  # perform the install, which was never what installed anything: setup-rust-env
+  # had already done it a step earlier. The `install: false` those extra calls
+  # carried elsewhere described a no-op, not a policy.
+  setup:
+    name: Tool manifest installs
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      # setup-rust-env runs jdx/mise-action itself, keyed on mise.lock/mise.toml.
+      # The second invocation that used to follow keyed the mise cache on
+      # `steps.rust-env.outputs.cache-key`, which is the CARGO key hashed on
+      # Cargo.lock -- so the mise toolset was cached under something that moves
+      # whenever a Rust dependency does. One setup, keyed on its own inputs.
+      - uses: ./.github/actions/setup-rust-env

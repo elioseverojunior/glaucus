@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+[package]
+# Inherits `exclude = ["/tests"]`: integration tests are developed in-repo but
+# stripped from the published .crate, since they exercise this workspace
+# rather than the packaged library. Declared on every published crate so a
+# tests/ dir added later is covered without touching this file.
+authors.workspace = true
+categories.workspace = true
+description = "Core YAML 1.2.2 scanner, parser, and composer — safe, fast, spec-complete"
+edition.workspace = true
+exclude.workspace = true
+keywords.workspace = true
+license.workspace = true
+name = "glaucus-core"
+readme = "README.md"
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[package.metadata.docs.rs]
+# docs.rs reads this per package; there is no workspace-level form and
+# `package.metadata` is not inheritable, so every published crate repeats it.
+# Feature-gated items are invisible without `all-features`.
+all-features = true
+# Nightly-only rustdoc flag, which is fine: docs.rs builds on nightly.
+# `--document-private-items` is deliberately NOT set — internals belong in a
+# local `cargo doc`, not in the crate's public documentation.
+rustdoc-args = ["--generate-link-to-definition"]
+
+# Intentionally empty. glaucus-core is the zero-dependency foundation of the
+# workspace, as deny.toml states; `cargo machete` flagged the one entry that had
+# accumulated here (num-traits, never referenced from any source file).
+[dependencies]
+
+[dev-dependencies]
+
+[lints]
+workspace = true

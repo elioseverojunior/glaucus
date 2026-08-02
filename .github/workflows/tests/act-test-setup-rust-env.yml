@@ -1,0 +1,78 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: setup-rust-env
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+env:
+  CARGO_TERM_COLOR: always
+  # `mise run` installs [tools] before every task, which overrides mise-action's
+  # `install: false`: the Supply Chain job spent 8m57s having `mise run comply`
+  # build all 26 pinned tools from source, because mise looks for cargo-binstall
+  # at ~/.cargo/bin and CI has none, so its cargo backend compiles instead. The
+  # gates below use mise for its config flags, not for provisioning --
+  # setup-rust-env has already put every tool they need on PATH as a prebuilt
+  # binary.
+  MISE_TASK_RUN_AUTO_INSTALL: false
+  # mise.toml's [env] does `GITHUB_TOKEN = {{env.GITHUB_TOKEN | default(value='')}}`,
+  # so with nothing set it exports an EMPTY token -- worse than unset, since any
+  # tool that reads it then makes unauthenticated, rate-limited API calls.
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+jobs:
+  # Tests and coverage are one job because they are one command: tarpaulin
+  # builds and runs the suite to instrument it, so a separate `mise run test`
+  # step compiled and ran everything twice. It also let the two disagree --
+  # tests passed in `Format, Lint, Test` while this job failed on the coverage
+  # the very same run produced.
+  tests:
+    name: Tests
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      # Two steps, because a YAML key cannot be conditionally omitted. act
+      # substitutes its copy-the-working-tree shortcut only for a checkout
+      # carrying no `ref`/`token`; given either it runs the real action, which
+      # fetches from GitHub and dies with `upload-pack: not our ref` on any
+      # commit not yet pushed -- every commit worth testing locally. Blanking
+      # them is not a way out: the action then fails validation with
+      # `Input required and not supplied: token`.
+      #
+      # `!= 'true'` rather than `== 'false'`: the variable is unset on GitHub,
+      # where `'' == 'false'` is also false, which would have taken the act path
+      # in the one place the real checkout is required. `mise run act:setup`
+      # writes ACT=true into `.act/.vars`.
+      - name: Checkout
+        if: ${{ vars.ACT != 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      - name: Checkout (act copies the working tree)
+        if: ${{ vars.ACT == 'true' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+
+      # llvm-tools, which tarpaulin's llvm engine needs to instrument doctests,
+      # comes from rust-toolchain.toml's `components`.
+      - uses: ./.github/actions/setup-rust-env
+        id: rust-env

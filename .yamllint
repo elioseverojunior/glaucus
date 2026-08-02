@@ -1,0 +1,50 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# yamllint-rs configuration ~ https://github.com/AvnerCohen/yamllint-rs
+# Uses the same format as Python yamllint for compatibility.
+
+extends: default
+
+# Two corpora here are INTENTIONALLY malformed and must never be linted:
+#   * the yaml-test-suite submodule — a conformance corpus of deliberately
+#     invalid fixtures;
+#   * crates/glaucus-fuzz/corpus/ — fuzzer seeds, whose whole purpose is to
+#     exercise edge cases (odd spacing after colons, spaces inside brackets).
+# Both paths arrived here naming comply's tree (`crates/comply-yaml-test:suite`,
+# note also the `:` where a `-` belongs), so neither matched and every commit
+# failed on the fuzz seeds. node_modules and target/ are machine-generated.
+#
+# Keep this list in sync with .yamllint.yml and with the note in
+# scripts/file-hygiene.py.
+ignore: |
+  crates/glaucus-yaml-test-suite/data/
+  crates/glaucus-fuzz/corpus/
+  node_modules/
+  target/
+  *.md
+
+rules:
+  # Completely ignore comment formatting rules
+  comments: disable
+
+  # Commented-out config blocks (e.g. the disabled post-commit job) aren't
+  # indented like surrounding content; don't flag that.
+  comments-indentation: disable
+
+  # yamllint-rs indentation rule has a bug: after a sequence with multiple
+  # items, it incorrectly expects the next sibling key to be indented at 4
+  # spaces instead of 2. Disable until fixed upstream.
+  # See: https://github.com/AvnerCohen/yamllint-rs/issues (likely)
+  indentation: disable
+
+  # Allow longer lines than the 80-char default; keep it advisory, not fatal.
+  line-length: disable
+
+  # Our hand-written configs (mise tasks) don't start with `---`.
+  document-start: disable
+
+  # GitHub Actions workflows use `on:` as a mapping key, which YAML 1.1 reads as
+  # a boolean. Don't flag mapping keys for truthiness (values are still checked).
+  truthy: disable

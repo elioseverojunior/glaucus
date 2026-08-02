@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+key: value
+number: 42
+bool: true
+null_val: null

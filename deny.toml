@@ -1,0 +1,110 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+# Supply chain security policy for glaucus
+# Safety-first YAML 1.2.2 library — zero external deps in glaucus-core by design
+
+# ==============================================================================
+# License Management
+# ==============================================================================
+
+[licenses]
+# Only allow licenses compatible with glaucus's dual MIT OR Apache-2.0
+allow = [
+  "Apache-2.0",
+  "MIT",
+  "Unicode-3.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+]
+
+confidence-threshold = 0.8
+
+# Don't warn that permissive licenses in `allow` above (BSD-2/3-Clause, ISC,
+# Zlib, …) aren't present in the current, near-empty dependency graph: the
+# allowlist is intentionally forward-looking, so unused entries are expected
+# until real deps land. (This silences `license-not-encountered`.)
+unused-allowed-license = "allow"
+
+# libfuzzer-sys wraps LLVM's libFuzzer, so it is `(MIT OR Apache-2.0) AND NCSA`
+# — the NCSA term is not satisfiable by choosing a side of the OR, and cargo-deny
+# rejects the whole expression on it. NCSA is OSI-approved and FSF Free/Libre,
+# and this crate reaches only glaucus-fuzz, a `publish = false` dev harness that
+# ships in no release artifact. Scoped as a per-crate exception rather than
+# added to `allow` above, so NCSA stays rejected everywhere else.
+[[licenses.exceptions]]
+allow = ["NCSA"]
+crate = "libfuzzer-sys"
+
+# ==============================================================================
+# Security Advisories — Vulnerability Management
+# ==============================================================================
+
+[advisories]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/RustSec/advisory-db"]
+
+# No ignored advisories — glaucus has zero tolerance for known vulnerabilities
+ignore = []
+
+# ==============================================================================
+# Banned Dependencies — Supply Chain Security
+# ==============================================================================
+
+[bans]
+# Deny multiple versions — as a library, glaucus must not force version conflicts
+highlight = "all"
+multiple-versions = "deny"
+wildcards = "deny"
+
+deny = []
+
+# `syn` is mid-migration across the ecosystem: serde_derive 1.0.229 has moved to
+# syn 3, while wasm-bindgen 0.2.126 and zerocopy 0.8.55 — both at their latest
+# published versions — still build on syn 2. There is no dependency-graph fix
+# until those two migrate; the split is upstream, not ours.
+#
+# The duplicate is benign for consumers: syn is a proc-macro dependency compiled
+# by the host toolchain to generate code, so it is never linked into the shipped
+# rlib/cdylib. It costs compile time, not artifact size, and cannot produce the
+# incompatible-type conflicts that `multiple-versions = "deny"` exists to catch.
+#
+# Pinned to `syn@2` rather than a bare `syn` so that a *third* concurrent major
+# still fails the check. Drop this entry once wasm-bindgen and zerocopy ship on
+# syn 3.
+skip = [
+  { crate = "syn@2", reason = "syn 2->3 ecosystem migration; build-time-only proc-macro dep, never linked into shipped artifacts" },
+]
+
+# Benchmark-only competitor engines, now present as dev-deps of glaucus-bench:
+# noyalib, serde_yaml_ng, serde-saphyr, yaml-rust2 and rust-yaml. Listing any of
+# them here would exempt its whole transitive tree from the multiple-versions
+# check, which is defensible — none is ever in the shipped glaucus-* library
+# graph. (serde_yml is deliberately not among them: RUSTSEC-2025-0068, unsound +
+# archived.)
+#
+# Left empty on purpose. All five are in the graph, so a root added here would
+# match — no `unmatched-skip-root` warning — but none of them currently causes a
+# duplicate that fails the check, and a skip-tree root is a broad exemption that
+# would also silence future duplicates deeper in that tree. Add a specific root
+# only when it actually breaks `cargo deny check`.
+skip-tree = []
+
+# ==============================================================================
+# Source Control — Repository Security
+# ==============================================================================
+
+[sources]
+# Deny unknown sources — all deps must come from crates.io
+unknown-git = "deny"
+unknown-registry = "deny"
+
+allow-git = []
+
+# crates.io — cargo-deny normalizes the registry to this canonical identifier
+# regardless of the sparse/git protocol, so this single entry covers it (the
+# bare `https://index.crates.io` form never matched → `unmatched-source`).
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

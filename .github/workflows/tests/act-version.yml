@@ -1,0 +1,89 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+run-name: ACT Version Tests
+name: ACT Version Tests
+
+concurrency:
+  group: act-tests-version-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != github.event.repository.default_branch }}
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: read-all
+
+env:
+  # mise.toml's [env] does `GITHUB_TOKEN = {{env.GITHUB_TOKEN | default(value='')}}`,
+  # so with nothing set it exports an EMPTY token -- worse than unset, since any
+  # tool that reads it then makes unauthenticated, rate-limited API calls.
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+jobs:
+  # A JOB-level `uses:`, not a step. A step's `uses:` resolves to an ACTION -- a
+  # directory holding an action.yml -- so pointing one at a workflow file leaves
+  # act unable to classify the step at all: "Unable to determine how to run
+  # job:Tests step:...". Calling a reusable workflow is job syntax, and it is
+  # also what gives the caller `needs.<job>.outputs`, which is the thing under
+  # test here.
+  #
+  # No checkout in this workflow: version.yml checks itself out on its own
+  # runner, and the assertions below read outputs rather than files.
+  version:
+    name: Version
+    uses: ./.github/workflows/version.yml
+    secrets: inherit
+
+  tests:
+    name: Tests
+    needs: [version]
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      # Exercises the composed JSON against the action's REAL outputs. The jq in
+      # version.yml was checked against a hand-built camelCase payload, which
+      # cannot catch the action renaming or dropping a field -- these assertions
+      # can. Values arrive through `env:` rather than inline `${{ }}` so a value
+      # containing shell metacharacters cannot be interpreted as script.
+      - name: Assert composed version outputs
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          MAJOR_MINOR: ${{ needs.version.outputs.majorMinor }}
+          JSON: ${{ needs.version.outputs.json }}
+        run: |
+          set -Eeuo pipefail
+
+          printf 'version    = %s\nmajorMinor = %s\n' "${VERSION}" "${MAJOR_MINOR}"
+          printf '%s\n' "${JSON}" | jq .
+
+          fail() { echo "::error::$*"; exit 1; }
+
+          printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' \
+            || fail "version is not SemVer-shaped: '${VERSION}'"
+          printf '%s' "${MAJOR_MINOR}" | grep -Eq '^[0-9]+\.[0-9]+$' \
+            || fail "majorMinor is not major.minor: '${MAJOR_MINOR}'"
+
+          # PascalCase survived the conversion. Unconverted, `.Major` is null and
+          # MajorMinor composes as the literal string "null.null".
+          printf '%s' "${JSON}" | jq -e 'has("SemVer") and has("MajorMinor")' >/dev/null \
+            || fail "JSON keys are not PascalCase: $(printf '%s' "${JSON}" | jq -c 'keys')"
+          printf '%s' "${JSON}" | jq -e '.MajorMinor | test("^[0-9]+\\.[0-9]+$")' >/dev/null \
+            || fail "MajorMinor malformed: $(printf '%s' "${JSON}" | jq -r '.MajorMinor')"
+
+          # The two fields version:json deletes must not reappear.
+          printf '%s' "${JSON}" | jq -e 'has("AssemblySemVer") or has("AssemblySemFileVer") | not' >/dev/null \
+            || fail "AssemblySemVer/AssemblySemFileVer were not deleted"
+
+          # The lifted outputs must agree with the object they came from.
+          printf '%s' "${JSON}" | jq -e --arg v "${VERSION}" '.SemVer == $v' >/dev/null \
+            || fail "outputs.version disagrees with json.SemVer"
+          printf '%s' "${JSON}" | jq -e --arg mm "${MAJOR_MINOR}" '.MajorMinor == $mm' >/dev/null \
+            || fail "outputs.majorMinor disagrees with json.MajorMinor"
+
+          echo "All version output assertions passed."

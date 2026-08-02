@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: "Summary Report"
+description: "Generate a GitHub Step Summary from a SARIF report file"
+inputs:
+  file-path:
+    description: "Path to the SARIF report file"
+    required: true
+  title:
+    description: "Report title for the summary header"
+    required: false
+    default: "Scan Summary"
+  tool-name:
+    description: "Name of the scanning tool (for display)"
+    required: false
+    default: "Scan"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Generate ${{ inputs.tool-name }} Summary Report
+      # NOT `bash -l`. A login shell sources ~/.bash_logout on exit, and the
+      # runner image's copy runs `clear_console`, which fails with no tty in a
+      # container -- its status then replaces the script's own `exit 0`, so this
+      # step reported failure after doing its job perfectly.
+      shell: bash {0}
+      run: |
+        set -euo pipefail
+
+        FILE="${{ inputs.file-path }}"
+        TITLE="${{ inputs.title }}"
+        TOOL="${{ inputs.tool-name }}"
+
+        # This step only reports, so it must never be the reason a build fails.
+        # `$GITHUB_STEP_SUMMARY` is quoted and defaulted because `set -u` turns an
+        # unset one into an "unbound variable" exit 1, and every write below runs
+        # before any output would explain why.
+        SUMMARY="${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+        if [ ! -s "$FILE" ]; then
+          echo "### $TOOL Report" >> "$SUMMARY"
+          echo "No SARIF results at \`$FILE\`. $TOOL may not have run, or produced no report." >> "$SUMMARY"
+          exit 0
+        fi
+
+        # A tool that failed mid-write leaves truncated JSON behind; report that
+        # rather than letting jq's parse error mask the real failure upstream.
+        if ! jq -e . "$FILE" >/dev/null 2>&1; then
+          echo "### $TOOL Report" >> "$SUMMARY"
+          echo "\`$FILE\` is not valid JSON -- $TOOL likely failed before finishing its report." >> "$SUMMARY"
+          exit 0
+        fi
+
+        TOTAL=$(jq '[.runs[]?.results[]?] | length' "$FILE" 2>/dev/null || echo 0)
+        TOTAL="${TOTAL:-0}"
+
+        echo "### $TOOL Summary" >> "$SUMMARY"
+
+        if [ "$TOTAL" -eq "0" ]; then
+          echo "**No issues detected.**" >> "$SUMMARY"
+        else
+          echo "**$TOTAL issue(s) found.**" >> "$SUMMARY"
+          echo "" >> "$SUMMARY"
+          echo "| Rule ID | File | Line | Description |" >> "$SUMMARY"
+          echo "| --- | --- | --- | --- |" >> "$SUMMARY"
+
+          jq -r '.runs[]?.results[]? | "\(.ruleId)|\(.locations[0].physicalLocation.artifactLocation.uri)|\(.locations[0].physicalLocation.region.startLine)|\(.message.text)"' "$FILE" \
+            | while IFS='|' read -r rule file line msg; do
+              echo "| \`$rule\` | \`$file\` | $line | $msg |" >> "$SUMMARY"
+            done
+        fi
