@@ -372,9 +372,134 @@ run = '''
 hk fix --stage --all
 '''
 
+[tasks."worktree:add"]
+alias = ["wt:add", "worktree"]
+description = "Create a git worktree on a new branch with submodules initialised"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+if [ "${usage_verbose:-false}" = "true" ]; then set -x; fi
+
+# THE REASON THIS TASK EXISTS: `git worktree add` does not initialise
+# submodules, and git offers no way to make it -- there is no
+# `--recurse-submodules` on `worktree add` (checked on git 2.55) and
+# `submodule.recurse` does not cover worktree creation. A bare `git worktree
+# add` therefore produces an EMPTY crates/glaucus-yaml-test-suite/data, and the
+# conformance harnesses open with `if !data_dir.exists() { return; }` -- so the
+# 735-case gate either passes having asserted nothing or dies on "0 faithful
+# cases". Controlling the creation path is the only way to prevent that;
+# `setup:submodules` self-heals a worktree made any other way, and
+# `test:conformance` refuses to run without the corpus.
+branch="${usage_branch}"
+base="${usage_from:-HEAD}"
+
+# Default location is a SIBLING of the repository, never a subdirectory: a
+# worktree inside the working tree is picked up by cargo's workspace glob, by
+# the docs build context and by `git status` in the parent.
+root="$(git rev-parse --show-toplevel)"
+slug="$(printf '%s' "${branch}" | tr '/' '-')"
+path="${usage_path:-${root}-wt-${slug}}"
+
+if [ -e "${path}" ]; then
+    echo "worktree:add: ${path} already exists" >&2
+    exit 1
+fi
+
+git worktree add -b "${branch}" "${path}" "${base}"
+
+# `-C`, not a `cd`: the submodule config lives in the shared .git directory, so
+# this must run with the NEW worktree as the working directory.
+echo "worktree:add: initialising submodules..."
+git -C "${path}" submodule update --init --recursive
+
+echo "worktree:add: ready at ${path} on ${branch}"
+'''
+shell = "bash -c"
+usage = '''
+flag "-v --verbose" help="Trace each command before running it (set -x)"
+arg "<branch>" help="Name of the new branch to create, e.g. fix/docs-nav"
+flag "--from <from>" help="Base ref for the new branch (default: HEAD)"
+flag "--path <path>" help="Worktree location (default: <repo>-wt-<branch> alongside the repo)"
+'''
+
+[tasks."setup:submodules"]
+alias = ["submodules", "setup:git:submodules"]
+description = "Ensure git submodules are initialised; --latest also advances them to the newest commit on their tracked branch"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+if [ "${usage_verbose:-false}" = "true" ]; then set -x; fi
+
+# `git worktree add` does NOT initialise submodules, and git offers no way to
+# make it: there is no `--recurse-submodules` on `worktree add` (git 2.55) and
+# `submodule.recurse` does not cover worktree creation. A fresh worktree
+# therefore gets an EMPTY crates/glaucus-yaml-test-suite/data, and both
+# conformance harnesses open with `if !data_dir.exists() { return; }` -- so the
+# 735-case gate passes having asserted nothing, or dies on "0 faithful cases".
+#
+# `git submodule status` prefixes an UNINITIALISED entry with `-`, which is the
+# only reliable signal: the directory exists either way, so a path test cannot
+# tell the two apart.
+if git submodule status --recursive 2>/dev/null | grep -q '^-'; then
+    echo "submodules: uninitialised entries found; initialising..."
+    git submodule update --init --recursive
+    echo "submodules: initialised"
+    exit 0
+fi
+
+# Already initialised. Advancing to the newest upstream commit is OPT-IN, and
+# deliberately not what `setup` triggers: `--remote` moves the recorded SHA, so
+# it dirties the working tree and changes which corpus the conformance gate runs
+# against. Doing that silently on every directory change -- `[hooks] enter`
+# calls `setup`, which depends on this task -- would rewrite a pinned test
+# fixture behind your back and make the 735-case result irreproducible.
+if [ "${usage_latest:-false}" != "true" ]; then
+    echo "submodules: already initialised (pass --latest to advance the pin)"
+    exit 0
+fi
+
+# `--remote` tracks the branch named in .gitmodules (`data` for the YAML suite)
+# rather than the SHA recorded in the parent commit.
+echo "submodules: fetching newest commit on each tracked branch..."
+git submodule update --remote --recursive
+
+# Scoped to the submodule PATHS, read from .gitmodules. Diffing the whole tree
+# instead reports any unrelated edit as a moved pin -- caught in testing, where
+# it blamed three files this task never touches.
+# An explicit counter, never `${#paths[@]}`: mise renders `run` as a Tera
+# template BEFORE bash sees it, and `{#` opens a Tera comment -- the array-length
+# form fails at render time with "Closing comment tag `#}` not found". `mapfile`
+# is avoided too, since macOS ships bash 3.2 without it.
+paths=()
+npaths=0
+while IFS= read -r line; do
+    if [ -n "${line}" ]; then
+        paths+=("${line}")
+        npaths=$((npaths + 1))
+    fi
+done < <(git config -f .gitmodules --get-regexp '^submodule\..*\.path$' | awk '{print $2}')
+
+if [ "${npaths}" -eq 0 ]; then
+    echo "submodules: none declared in .gitmodules"
+elif git diff --quiet -- "${paths[@]}"; then
+    echo "submodules: already at the newest commit; nothing moved"
+else
+    echo "submodules: the pin MOVED -- review and commit it deliberately:"
+    git diff --submodule=short -- "${paths[@]}" | sed 's/^/    /'
+fi
+'''
+shell = "bash -c"
+usage = '''
+flag "-v --verbose" help="Trace each command before running it (set -x)"
+flag "--latest" help="If already initialised, advance each submodule to the newest commit on its tracked branch (moves the pin and dirties the tree)"
+'''
+
 # === Tool Installation ===
 [tasks.setup]
 alias = ["install", "dev", "dev:setup", "dev:up"]
+depends = ["setup:submodules"]
 description = "Install tools, sourcing from Homebrew when it matches the pin"
 run = '''
 set -eo pipefail
