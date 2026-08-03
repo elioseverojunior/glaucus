@@ -107,9 +107,20 @@ use_branch_tags = false
 # Order releases and commits chronologically (oldest first within a release).
 sort_commits = "oldest"
 topo_order = false
-# Regex to match the tags that mark releases. The `v` prefix is optional so
-# both `git cliff --bump` (bare semver) and explicit `vX.Y.Z` tags are accepted.
-tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-.*)?$"
+# Regex to match the tags that mark releases: a PLAIN vX.Y.Z and nothing else.
+#
+# Three tag shapes land on this repository, and two of them must not become
+# changelog sections:
+#   v0.1.1      the release            <- the only one that is a release
+#   v0.1.1-13   per-commit marker      <- SemVer counter, one per commit
+#   v0.1 / v0   floating pointers      <- move to the newest release
+#
+# The release and its marker sit on the SAME commit, and git-cliff resolves one
+# tag per commit -- so while the pattern accepted a `-N` suffix it preferred the
+# marker and the changelog read `## [0.1.1-13]`, a heading no release, no tag
+# link and no crates.io version ever uses. Anchoring after the patch component
+# rejects the counter; the floating tags were already excluded for lacking one.
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
 
 [bump]
 # Derive the next version from conventional commit types when using `--bump`.

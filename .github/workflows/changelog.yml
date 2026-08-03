@@ -82,12 +82,13 @@ jobs:
           #   v0.1.1      the release            <- what a changelog is cut at
           #   v0.1.1-13   per-commit marker      <- SemVer counter, one per commit
           #   v0.1 / v0   floating pointers      <- move to the newest release
-          # A purely NUMERIC suffix is the commits-since-source counter, so it is
-          # excluded; a suffix starting with a letter is a real pre-release
-          # (-rc1, -beta.1) and is kept. Without this the newest tag resolves to
-          # v0.1.1-13 and the changelog is cut under a heading no release uses.
+          # A PLAIN vX.Y.Z and nothing else, matching cliff.toml's tag_pattern
+          # exactly -- the two must agree on what a release is, or this resolves
+          # a version git-cliff then declines to treat as one. Without it the
+          # newest tag is v0.1.1-13 and the changelog is cut under a heading no
+          # release, tag link or crates.io version ever uses.
           newest="$(git tag -l 'v*' --sort=-v:refname \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z][0-9A-Za-z.]*)?$' \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
             | head -1 || true)"
           newest="${newest#v}"
 
