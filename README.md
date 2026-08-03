@@ -407,10 +407,22 @@ can never collide with a later commit. The GitHub Release and the crates.io
 upload both use `vX.Y.Z`; the two shorter tags are floating pointers, so `v0`
 always resolves to the newest 0.x release.
 
-Cut a release with `mise run release:prepare`: it computes the next version,
-writes it into every file that restates it, and regenerates `CHANGELOG.md` under
-that heading. It refuses to run outside the default branch, where GitVersion
-labels versions with the branch name.
+Only `vX.Y.Z` becomes a `CHANGELOG.md` section. The release and its `-N` marker
+sit on the same commit, and git-cliff resolves one tag per commit — so while
+`cliff.toml`'s `tag_pattern` accepted a suffix it preferred the marker and the
+changelog read `## [0.1.1-13]`, a heading no release, tag link or crates.io
+version ever uses. The pattern now anchors after the patch component, which also
+means a genuine pre-release such as `v0.2.0-rc1` gets no section of its own: its
+commits stay under `[Unreleased]` until a stable release absorbs them.
+
+Cut a release with `mise run release:prepare`: it computes the next version and
+writes it into every file that restates it. It refuses to run outside the
+default branch, where GitVersion labels versions with the branch name.
+
+`CHANGELOG.md` is **not** written there. The release pipeline regenerates and
+commits it after the crates are published, so the file records a version that
+actually reached crates.io rather than a local guess at the next one — and a
+release that fails to publish leaves no changelog entry claiming otherwise.
 
 ## Minimum Supported Rust Version
 
