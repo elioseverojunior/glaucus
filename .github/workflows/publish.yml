@@ -87,8 +87,36 @@ env:
 # `dry-run` input, resolved in `validate.check` below.
 
 jobs:
+  # RELEASE REFS ONLY, and gated HERE ALONE. Every other job descends from
+  # `validate`, and a skipped dependency skips its dependents -- so repeating
+  # this downstream protected nothing and gave five more places to get it
+  # wrong. Their `should_publish` checks stay: those draw a different line,
+  # between a real publish and a dry run.
+  #
+  # What this actually buys is narrow but real. `should_publish` already fails
+  # closed, so a tag push -- which carries no `inputs`, hence an empty dry-run
+  # -- can never publish. The one hole this closes is a human dispatching from
+  # a feature branch with dry-run explicitly false, which would upload that
+  # branch's code to crates.io.
+  #
+  # Both halves are load-bearing:
+  #
+  #   github.ref_type == 'tag'   -- `push: tags` above fires with ref_name set
+  #                                 to the TAG (v0.1.1), which never equals the
+  #                                 default branch name. Comparing only to the
+  #                                 branch skipped every job, and the workflow
+  #                                 reported success having published nothing.
+  #   ref_name == default_branch -- covers `workflow_call` from cicd.yml and a
+  #                                 manual dispatch, both of which run on main.
+  #
+  # Together they admit the two legitimate release routes and refuse a publish
+  # from an arbitrary branch.
   validate:
     name: Validate Release
+    if: >
+      success()
+      && (github.ref_type == 'tag'
+          || github.ref_name == github.event.repository.default_branch)
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       contents: read
@@ -146,8 +174,11 @@ jobs:
           # `= "true"` with publishing in the else branch, so ANY other value --
           # including the empty string -- released the crates. `inputs.dry-run`
           # is empty on any trigger that declares no such input, which is exactly
-          # what the commented-out `push: tags` above would reintroduce. A
-          # publish gate should need permission, not merely the absence of a veto.
+          # what the ACTIVE `push: tags` trigger above does: a tag push arrives
+          # with an empty value and correctly resolves to a dry run. That is why
+          # this demands an explicit "false" rather than merely the absence of
+          # "true" -- a publish gate should need permission, not the lack of a
+          # veto.
           if [ "${DRY_RUN}" = "false" ]; then
             echo "should_publish=true" >> "$GITHUB_OUTPUT"
             echo "Will proceed with publishing"
@@ -159,6 +190,9 @@ jobs:
   package:
     name: Package crates
     needs: [validate]
+    if: >
+      success()
+      && needs.validate.outputs.should_publish == 'true'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     outputs:
       hashes: ${{ steps.hash.outputs.hashes }}
@@ -271,7 +305,10 @@ jobs:
 
   sign:
     name: Sigstore signing
-    needs: [package]
+    needs: [validate, package]
+    if: >
+      success()
+      && needs.validate.outputs.should_publish == 'true'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       id-token: write
@@ -329,6 +366,9 @@ jobs:
     # No job-level `if` on should_publish: a dry run has to REACH here, or it
     # verifies nothing. Only the two steps that touch the registry are gated.
     needs: [validate, provenance, sign]
+    if: >
+      success()
+      && needs.validate.outputs.should_publish == 'true'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     environment: crates-io
     permissions:
@@ -617,7 +657,9 @@ jobs:
     # here. With `publish-crates` alone it is undefined, which reads as false --
     # so the docs publish would skip on every release without ever failing.
     needs: [validate, publish-crates]
-    if: needs.validate.outputs.should_publish == 'true'
+    if: >
+      success()
+      && needs.validate.outputs.should_publish == 'true'
     permissions:
       contents: write
       pages: write
