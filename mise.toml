@@ -830,9 +830,15 @@ gitversion /nocache /output json \
 '''
 
 # The exact tag name the `git:tag:*` tasks default to, so the derivation lives in
-# one place. `SemVer` rather than `MajorMinorPatch`: SemVer carries the
-# commits-since-source counter (`0.0.1-1`), which is what makes the tag name a
-# unique point in history rather than one that collides on the next commit. The
+# one place. `MajorMinorPatch`, NOT `SemVer`. SemVer appends
+# CommitsSinceVersionSource as a pre-release identifier (`0.1.0-1`), and
+# everything after the hyphen makes the whole version a SemVer PRE-RELEASE:
+# crates.io then reports max_stable_version separately, `cargo add glaucus`
+# resolved to the empty `0.0.0` placeholder instead of the real library, and
+# `cargo install` never selected it without an explicit `--version`.
+#
+# Losing per-commit uniqueness in the tag name is the point, not a regression: a
+# release tag should name a RELEASE, and the next release moves the number. The
 # floating tags are derived from this string by the tasks themselves, so an
 # explicitly named tag gets the same treatment without a second gitversion call.
 # Hidden for the same reason `version:json` is -- it is plumbing.
@@ -845,12 +851,12 @@ run = '''
 
 set -Eeuo pipefail
 
-VERSION="$(mise run version:json | jq -r '.SemVer // empty')"
+VERSION="$(mise run version:json | jq -r '.MajorMinorPatch // empty')"
 
 # Empty means version:json fell back to `{}` -- gitversion is missing or refused
 # the tree. Tagging `vnull` from that is worse than stopping.
 if [ -z "${VERSION}" ]; then
-    echo "error: version:json supplied no SemVer; is gitversion installed?" >&2
+    echo "error: version:json supplied no MajorMinorPatch; is gitversion installed?" >&2
     echo "       Name the tag explicitly, e.g. mise run git:tag:create v0.0.1-1" >&2
     exit 1
 fi
@@ -892,8 +898,8 @@ usage = 'arg "[tag]" help="tag to derive from, e.g. v0.0.1-1; defaults to the ve
 
 [tasks.version]
 alias = ["semver"]
-description = "Print GitVersion's SemVer for the working tree, e.g. 0.0.1-1 (the release input; NOT what the committed files are gated against -- see version:check)"
-run = "mise run version:json | jq -r '.SemVer'"
+description = "Print GitVersion's MajorMinorPatch for the working tree, e.g. 0.1.0 (the release input; NOT what the committed files are gated against -- see version:check)"
+run = "mise run version:json | jq -r '.MajorMinorPatch'"
 
 [tasks."version:sync"]
 alias = []
@@ -905,10 +911,9 @@ set -Eeuo pipefail
 
 # Cargo.toml's [workspace.package] version is the anchor: it is what `cargo
 # publish` uploads and what crates.io enforces, and it moves only on a
-# deliberate bump. `mise run version` is deliberately NOT the anchor -- its
-# SemVer carries CommitsSinceVersionSource, so it advances on EVERY commit and a
-# gate against it could never converge: the commit that sets Cargo.toml to
-# 0.0.1-2 is itself what makes the expected value 0.0.1-3.
+# deliberate bump. `mise run version` is deliberately NOT the anchor: it is
+# GitVersion's derivation for the NEXT release, which the committed files only
+# adopt when a bump is actually cut.
 #
 # Only files that CLAIM the current version are listed below. mise.toml holds
 # nine `v0.0.1-1` strings that are examples in help text ("e.g. v0.0.1-1"); a
@@ -947,25 +952,30 @@ stale() {
 # `--from-git` moves the anchor itself, so a release bump is computed rather
 # than hand-edited. Everything below then propagates from it exactly as before.
 #
-# `SemVer`, matching `version:tag`: the project version carries the
-# commits-since-source counter, so `0.1.0-10` and not `0.1.0`. One field feeds
-# both the files and the tag, and neither can drift from the other.
+# `MajorMinorPatch`, matching `version:tag`: `0.1.0`, with no
+# commits-since-source counter. One field feeds both the files and the tag, so
+# neither can drift from the other.
 #
-# THE COUNTER MAKES THIS SELF-REFERENTIAL, so the release commit must be an
-# AMEND. `CommitsSinceVersionSource` is the commit count -- 10 at HEAD, with
-# `git rev-list --count HEAD` agreeing exactly -- so writing `0.1.0-10` and then
-# adding a NEW commit lands that string at count 11 and the file is stale the
-# instant it is written. `git commit --amend` leaves the count alone and the
-# value stays true. The alternative is to cut the tag immediately, which resets
-# the distance to 0.
+# THIS REPLACED `SemVer`, which appended the counter (`0.1.0-10`) and cost two
+# things that were not worth it:
 #
-# Known consequence, accepted deliberately: everything after the hyphen makes
-# this a SemVer PRERELEASE, and `cargo install` resolves an implicit `*` that
-# never selects one, so installs need `--version 0.1.0-10` spelled out.
+#   * Everything after the hyphen makes the whole version a SemVer PRE-RELEASE.
+#     crates.io tracked max_stable_version separately, so `cargo add glaucus`
+#     resolved the empty `0.0.0` placeholder rather than the real library, and
+#     `cargo install` -- resolving an implicit `*`, which never selects a
+#     pre-release -- needed `--version 0.1.0-10` spelled out.
+#   * The counter was SELF-REFERENTIAL and forced the release commit to be an
+#     amend: `CommitsSinceVersionSource` is the commit count, so writing
+#     `0.1.0-10` and then adding a NEW commit landed that string at count 11 and
+#     the file was stale the instant it was written. Amending on main is now
+#     forbidden, which left that scheme with no legal way to release at all.
+#
+# MajorMinorPatch is stable under both: it does not move when a commit is added,
+# so an ordinary additive commit records a value that stays true.
 if [ "$from_git" = true ]; then
-    computed="$(mise run version:json | jq -r '.SemVer // empty')"
+    computed="$(mise run version:json | jq -r '.MajorMinorPatch // empty')"
     if [ -z "$computed" ]; then
-        echo "version: gitversion produced no SemVer; is it installed?" >&2
+        echo "version: gitversion produced no MajorMinorPatch; is it installed?" >&2
         exit 1
     fi
     if stale "Cargo.toml [workspace.package] version" "$anchor" "$computed"; then
@@ -2009,7 +2019,9 @@ flag "-o --output <path>" help="Write somewhere other than CHANGELOG.md, e.g. RE
 # exposes no `--bump` flag.
 #
 # Neither commits nor tags. `version:tag` cuts the tag, and the commit needs the
-# per-action approval every commit here needs.
+# per-action approval every commit here needs. Since the version no longer
+# carries a commit counter, that commit is an ordinary additive one -- it does
+# NOT have to be an amend to keep the number true.
 [tasks."release:prepare"]
 alias = ["rp"]
 description = "Compute the next version from GitVersion, write it into every file that restates it, and regenerate CHANGELOG.md under that heading. --check previews without writing"
@@ -2020,29 +2032,35 @@ set -Eeuo pipefail
 
 checking="${usage_check:-false}"
 
-version="$(mise run version:json | jq -r '.SemVer // empty')"
+version="$(mise run version:json | jq -r '.MajorMinorPatch // empty')"
 if [ -z "$version" ]; then
-    echo "release:prepare: gitversion produced no SemVer; is it installed?" >&2
+    echo "release:prepare: gitversion produced no MajorMinorPatch; is it installed?" >&2
     exit 1
 fi
 
-# Refuse a version cliff.toml would not recognise as a release. `--tag` BYPASSES
-# `tag_pattern`, so without this the heading renders happily now and the tag is
-# silently ignored later -- the section reappears as [Unreleased] on the next
-# regeneration, with nothing to explain why. Off the default branch GitVersion
-# labels with the branch name (0.1.0-my-branch.1), which `tag_pattern`
-# (`^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+.*)?$`) does not accept.
+# Refuse to cut a release from a non-mainline branch. The shape of `version`
+# can no longer detect this: `MajorMinorPatch` STRIPS the branch label, so a
+# feature branch yields a perfectly release-shaped `0.1.1` while GitVersion's
+# own SemVer reads `0.1.1-fix-version-major-minor-patch.1`. A regex over
+# MajorMinorPatch would therefore always pass and give false assurance.
+#
+# `PreReleaseLabel` is the field that actually carries the distinction: empty on
+# the default branch, the branch name anywhere else. Cutting elsewhere writes a
+# changelog heading and a tag for a version the release pipeline never produces.
 #
 # A hard error only when WRITING. `--check` is the preview path and previewing
 # from a feature branch is legitimate, so there it warns and carries on.
-if ! printf '%s' "v${version}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9]+.*)?$'; then
+label="$(mise run version:json | jq -r '.PreReleaseLabel // empty')"
+if [ -n "${label}" ]; then
     if [ "$checking" = true ]; then
-        printf 'warning: v%s is not a release-shaped version; cliff.toml would ignore this tag.\n' "$version" >&2
-        printf '         Previewing anyway -- cut the real release from the default branch.\n\n' >&2
+        printf 'warning: on branch-labelled version "%s" (label %s); previewing only.\n' \
+            "$(mise run version:json | jq -r .SemVer)" "${label}" >&2
+        printf '         Cut the real release from the default branch.\n\n' >&2
     else
-        printf 'release:prepare: refusing v%s -- cliff.toml tag_pattern would not treat it as a release.\n' "$version" >&2
-        printf '                 GitVersion labels non-default branches with the branch name; cut this\n' >&2
-        printf '                 from the default branch, or use --check to preview.\n' >&2
+        printf 'release:prepare: refusing to cut v%s from a non-default branch (GitVersion label "%s").\n' \
+            "$version" "${label}" >&2
+        printf '                 MajorMinorPatch hides the label, so this would look like a clean\n' >&2
+        printf '                 release while the pipeline never produces it. Use --check to preview.\n' >&2
         exit 1
     fi
 fi

@@ -7,7 +7,7 @@ assembly-versioning-scheme: MajorMinorPatch
 assembly-file-versioning-scheme: MajorMinorPatch
 tag-prefix: "[vV]?"
 version-in-branch-pattern: (?<version>[vV]?\d+(\.\d+)?(\.\d+)?).*
-next-version: 0.1.0-1
+# next-version: 0.1.0
 # Conventional Commits + Legacy +semver patterns (ref: https://gitversion.net/docs/reference/version-increments)
 major-version-bump-message: '(^(feat|fix|refactor|perf|revert|build|ci|chore|docs|style|test)(\(.+\))?!:)|(^BREAKING[ -]CHANGE:)|((?:\b(\+|semver:)\s?)(bump|(break(?:ing)?|major)\b))'
 minor-version-bump-message: '(^feat(\(.+\))?:)|((?:\b(\+|semver:)\s?)(feat(?:ure)|minor))'
