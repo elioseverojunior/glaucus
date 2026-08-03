@@ -1,0 +1,177 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Changelog
+
+on:
+  # NO `version` input here, deliberately. CHANGELOG.md is CUMULATIVE -- the
+  # whole history in one file -- so regenerating it at an older tag silently
+  # DROPS every newer release from it. An operator picking a version by hand is
+  # exactly how that happens, so the manual path takes no version at all and
+  # always resolves the newest release tag. The guard in the job below still
+  # enforces it for the `workflow_call` path, where the caller supplies one.
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Regenerate and show the diff without committing"
+        required: false
+        type: boolean
+        default: true
+
+  # Called after a release has actually published, so the changelog records a
+  # version that reached crates.io rather than one that was merely tagged.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version just published (e.g. 0.1.1). Defaults to the newest release tag."
+        required: false
+        type: string
+      dry-run:
+        description: "Regenerate and show the diff without committing"
+        required: false
+        type: boolean
+        default: true
+
+# NOT `read-all`. This workflow is CALLED, and a called workflow cannot request
+# more than the calling JOB grants. `read-all` expands to read on every scope
+# there is, so the call fails with "The workflow is requesting 'actions: read,
+# artifact-metadata: read, ...' but is only allowed". publish.yml carries the
+# same note for the same reason. A job needing more declares it itself.
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog
+    # The commit lands on the default branch, so running anywhere else could only
+    # either push to a branch the operator did not name or generate a changelog
+    # from a ref that never shipped. Dispatching from a feature branch therefore
+    # skips, rather than doing something surprising.
+    if: ${{ github.ref_name == github.event.repository.default_branch }}
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+    steps:
+      # Checks out the DEFAULT BRANCH, not the triggering ref: this commit lands
+      # on main. Full history and tags, because git-cliff derives every section
+      # of the changelog from them.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          fetch-tags: "true"
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      # Provides mise and, through it, git-cliff -- the same task the rest of the
+      # repository uses, so the tool and its config live in one place.
+      - name: Setup Environment
+        uses: ./.github/actions/setup-rust-env
+
+      - name: Resolve version
+        id: resolve
+        shell: bash
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          set -Eeuo pipefail
+
+          # RELEASE tags only, which is narrower than cliff.toml's tag_pattern.
+          # Three tag shapes coexist here:
+          #   v0.1.1      the release            <- what a changelog is cut at
+          #   v0.1.1-13   per-commit marker      <- SemVer counter, one per commit
+          #   v0.1 / v0   floating pointers      <- move to the newest release
+          # A purely NUMERIC suffix is the commits-since-source counter, so it is
+          # excluded; a suffix starting with a letter is a real pre-release
+          # (-rc1, -beta.1) and is kept. Without this the newest tag resolves to
+          # v0.1.1-13 and the changelog is cut under a heading no release uses.
+          newest="$(git tag -l 'v*' --sort=-v:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z][0-9A-Za-z.]*)?$' \
+            | head -1 || true)"
+          newest="${newest#v}"
+
+          resolved="${INPUT_VERSION#v}"
+          if [ -z "${resolved}" ]; then
+            resolved="${newest}"
+          fi
+
+          if [ -z "${resolved}" ]; then
+            echo "::error::No release tag found and no version supplied; nothing to cut a changelog at."
+            exit 1
+          fi
+
+          # THE DOWNGRADE GUARD. CHANGELOG.md is cumulative, so cutting it at an
+          # older version rewrites the file without the newer releases -- a
+          # silent history deletion that looks like a routine one-file commit.
+          # Only reachable through `workflow_call`, since the manual path takes
+          # no version, but the caller is just as capable of passing a stale one.
+          if [ -n "${newest}" ] && [ "${resolved}" != "${newest}" ]; then
+            oldest="$(printf '%s\n%s\n' "${resolved}" "${newest}" | sort -V | head -1)"
+            if [ "${oldest}" = "${resolved}" ]; then
+              echo "::error::Refusing to cut CHANGELOG.md at ${resolved}: ${newest} is newer. Regenerating here would drop every release after ${resolved} from the file."
+              exit 1
+            fi
+          fi
+
+          echo "version=${resolved}" >> "$GITHUB_OUTPUT"
+          echo "Cutting CHANGELOG.md at v${resolved} (newest tag: ${newest:-none})"
+
+      - name: Commit CHANGELOG.md
+        shell: bash
+        env:
+          VERSION: v${{ steps.resolve.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: |
+          set -Eeuo pipefail
+
+          echo "::group::Generating CHANGELOG.md for ${VERSION}"
+          # NO `--latest`. That selector emits a SINGLE release section, so
+          # writing it here would replace the entire history with just this
+          # release, on every release (verified: 1 section against 2 for the
+          # full document). `--latest` belongs on RELEASE_NOTES.md, which is a
+          # per-release body. `--tag` files the unreleased commits under the
+          # version being cut instead of leaving them under [Unreleased].
+          mise run changelog --tag "${VERSION}"
+
+          # git-cliff appends a newline to a document whose footer already ends
+          # with one, so the file lands with a trailing blank line that the
+          # local pre-commit end-of-file-fixer strips. Left alone, the two
+          # disagree forever: every CI run re-adds the line a local commit just
+          # removed, and each one is a commit that changes nothing else.
+          printf '%s\n' "$(cat CHANGELOG.md)" > CHANGELOG.md
+          echo "::endgroup::"
+
+          echo "::group::Committing CHANGELOG.md"
+          # Scoped to the one file, in both the test and the staging. A bare
+          # `git diff` would react to anything else dirty in the tree, and
+          # `git commit -a` would sweep it into a commit meant to carry one
+          # generated file. This is also the no-op guard: a re-run for the same
+          # version produces an identical file and commits nothing.
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md is already current for ${VERSION}; nothing to commit"
+            exit 0
+          fi
+
+          git diff -- CHANGELOG.md
+
+          if [ "${DRY_RUN}" = "true" ]; then
+            echo "Dry run: the diff above would be committed to ${BRANCH} as ${VERSION}"
+            exit 0
+          fi
+
+          # Nothing else in this job configures an identity, so `git commit`
+          # would fail with "Author identity unknown".
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add CHANGELOG.md
+          # `[skip ci]` is belt-and-braces: this push uses GITHUB_TOKEN, and
+          # GitHub raises no workflow-triggering event for that token, so it
+          # cannot retrigger anything. The marker is what still holds if the
+          # token is ever swapped for a PAT.
+          git commit -m "chore: update CHANGELOG.md for ${VERSION} [skip ci]"
+          git push origin "HEAD:${BRANCH}"
+          echo "CHANGELOG.md committed to ${BRANCH}"
+          echo "::endgroup::"
