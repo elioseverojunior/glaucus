@@ -54,24 +54,52 @@ jobs:
       - name: Assert composed version outputs
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          SEM_VER: ${{ needs.version.outputs.semVer }}
+          MAJOR_MINOR_PATCH: ${{ needs.version.outputs.majorMinorPatch }}
           MAJOR_MINOR: ${{ needs.version.outputs.majorMinor }}
           JSON: ${{ needs.version.outputs.json }}
         run: |
           set -Eeuo pipefail
 
-          printf 'version    = %s\nmajorMinor = %s\n' "${VERSION}" "${MAJOR_MINOR}"
+          printf 'version    = %s\nsemVer     = %s\nmajorMinor = %s\n' \
+            "${VERSION}" "${SEM_VER}" "${MAJOR_MINOR}"
           printf '%s\n' "${JSON}" | jq .
 
           fail() { echo "::error::$*"; exit 1; }
 
-          printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' \
-            || fail "version is not SemVer-shaped: '${VERSION}'"
+          # THE REGRESSION GUARD. `version` is what `cargo publish` uploads, and
+          # it must be a plain X.Y.Z with NO pre-release part -- hence the `$`
+          # anchor, which the previous unanchored pattern lacked and which is the
+          # whole reason this assertion exists. `version` was GitVersion's SemVer,
+          # which appends CommitsSinceVersionSource as a pre-release identifier
+          # (`0.1.0-1`); everything after the hyphen makes the release a SemVer
+          # PRE-RELEASE, so crates.io reported no stable version at all and
+          # `cargo add glaucus` resolved an empty `0.0.0` placeholder instead of
+          # the library. Anchoring here fails the build if that ever comes back.
+          printf '%s' "${VERSION}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' \
+            || fail "version must be a stable X.Y.Z with no pre-release: '${VERSION}'"
           printf '%s' "${MAJOR_MINOR}" | grep -Eq '^[0-9]+\.[0-9]+$' \
             || fail "majorMinor is not major.minor: '${MAJOR_MINOR}'"
 
+          # `semVer` is the full derivation and MAY carry a pre-release, so it is
+          # checked for shape only -- asserting it equals `version` would defeat
+          # the point of publishing both.
+          printf '%s' "${SEM_VER}" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' \
+            || fail "semVer is not SemVer-shaped: '${SEM_VER}'"
+
+          # SemVer is MajorMinorPatch plus an optional pre-release/build suffix,
+          # so it always begins with the release version. This is what catches
+          # the two drifting apart -- a `semVer` of 0.2.0-1 beside a `version` of
+          # 0.1.0 means the derivation and the published number disagree.
+          case "${SEM_VER}" in
+            "${VERSION}") ;;
+            "${VERSION}"-*|"${VERSION}"+*) ;;
+            *) fail "semVer '${SEM_VER}' is not version '${VERSION}' plus a suffix" ;;
+          esac
+
           # PascalCase survived the conversion. Unconverted, `.Major` is null and
           # MajorMinor composes as the literal string "null.null".
-          printf '%s' "${JSON}" | jq -e 'has("SemVer") and has("MajorMinor")' >/dev/null \
+          printf '%s' "${JSON}" | jq -e 'has("SemVer") and has("Version") and has("MajorMinor")' >/dev/null \
             || fail "JSON keys are not PascalCase: $(printf '%s' "${JSON}" | jq -c 'keys')"
           printf '%s' "${JSON}" | jq -e '.MajorMinor | test("^[0-9]+\\.[0-9]+$")' >/dev/null \
             || fail "MajorMinor malformed: $(printf '%s' "${JSON}" | jq -r '.MajorMinor')"
@@ -80,9 +108,18 @@ jobs:
           printf '%s' "${JSON}" | jq -e 'has("AssemblySemVer") or has("AssemblySemFileVer") | not' >/dev/null \
             || fail "AssemblySemVer/AssemblySemFileVer were not deleted"
 
-          # The lifted outputs must agree with the object they came from.
-          printf '%s' "${JSON}" | jq -e --arg v "${VERSION}" '.SemVer == $v' >/dev/null \
-            || fail "outputs.version disagrees with json.SemVer"
+          # The lifted outputs must agree with the object they came from. NOTE
+          # `.Version`, not `.SemVer`: the republished JSON now carries both, and
+          # pinning `outputs.version` to `.SemVer` is exactly the conflation this
+          # change removed.
+          printf '%s' "${JSON}" | jq -e --arg v "${VERSION}" '.Version == $v' >/dev/null \
+            || fail "outputs.version disagrees with json.Version"
+          printf '%s' "${JSON}" | jq -e --arg v "${VERSION}" '.MajorMinorPatch == $v' >/dev/null \
+            || fail "outputs.version disagrees with json.MajorMinorPatch"
+          printf '%s' "${JSON}" | jq -e --arg s "${SEM_VER}" '.SemVer == $s' >/dev/null \
+            || fail "outputs.semVer disagrees with json.SemVer"
+          printf '%s' "${JSON}" | jq -e --arg mmp "${MAJOR_MINOR_PATCH}" '.MajorMinorPatch == $mmp' >/dev/null \
+            || fail "outputs.majorMinorPatch disagrees with json.MajorMinorPatch"
           printf '%s' "${JSON}" | jq -e --arg mm "${MAJOR_MINOR}" '.MajorMinor == $mm' >/dev/null \
             || fail "outputs.majorMinor disagrees with json.MajorMinor"
 
