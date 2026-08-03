@@ -245,7 +245,15 @@ jobs:
     # `version` as well as `tests`: a job can only read `needs.<job>.outputs` from
     # a DIRECT dependency, so anything here that stamps the version has to name it
     # even though `release` does too.
-    needs: [tests, version]
+    # `setup`/`version` only. `build` consumes nothing from `tests` -- no
+    # artifact passes between them -- so waiting on it served no purpose beyond
+    # serialising the two longest jobs. `release` below now depends on both, so
+    # the gate is unchanged: a failing test still blocks the release.
+    needs: [setup, version]
+    if: >
+      success()
+      && needs.setup.result == 'success'
+      && needs.version.result == 'success'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
@@ -377,9 +385,13 @@ jobs:
   # ──────────────────────────────────────────────
   release:
     name: Release
-    needs: [build, version]
+    needs: [tests, build, version]
     if: >
-      github.ref_name == github.event.repository.default_branch
+      success()
+      && needs.tests.result == 'success'
+      && needs.build.result == 'success'
+      && needs.version.result == 'success'
+      && github.ref_name == github.event.repository.default_branch
       && github.event_name == 'push'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
@@ -511,81 +523,6 @@ jobs:
             tagger "v${{ needs.version.outputs.major }}"
             echo "::endgroup::"
           fi
-          echo "::endgroup::"
-
-      - name: Versions
-        id: versions
-        shell: bash -l {0}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
-        run: |
-          echo "::group::Latest Released Tags Output"
-          # Latest GitHub release — the full-semver entry created by
-          # the `gh release create` step on previous runs. `gh release
-          # view` (no arg) resolves to the latest release by published
-          # date. Exits non-zero when there are no releases yet; the
-          # `|| true` fallback keeps the variable empty without failing
-          # the step. On first-ever release, both variables below stay
-          # empty strings — the Build Changelog step's `fromTag` input
-          # accepts empty (action auto-detects or uses empty_template).
-          RELEASED_RELEASE_DESC=$(
-            gh release view \
-              --json tagName,isPrerelease,publishedAt \
-              --jq '"\(.tagName) [\(if .isPrerelease then "prerelease" else "stable" end), \(.publishedAt)]"' \
-              2>/dev/null || echo "(no releases yet)"
-          )
-          echo "Latest GitHub release: ${RELEASED_RELEASE_DESC}"
-
-          echo ""
-          # Rolling umbrella tags are force-pushed on every release by
-          # the Tag step. They exist as git tags WITHOUT corresponding
-          # `gh release` entries, so we enumerate them via `git tag -l`
-          # + semver-pattern filters. Tags were fetched during Checkout
-          # (`fetch-tags: true`).
-          echo "Rolling umbrella tags (git-only, no GitHub release):"
-          ALL_TAGS=$(git tag -l 'v*' --sort=-v:refname 2>/dev/null || true)
-          RELEASED_SEMVER_GIT=$(printf '%s\n' "${ALL_TAGS}" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+(-.*)?$' | head -1)
-          RELEASED_MMP=$(printf '%s\n' "${ALL_TAGS}" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-          RELEASED_MM=$(printf  '%s\n' "${ALL_TAGS}" | grep -E '^v[0-9]+\.[0-9]+$' | head -1)
-          RELEASED_M=$(printf   '%s\n' "${ALL_TAGS}" | grep -E '^v[0-9]+$' | head -1)
-          echo "  SemVer:          ${RELEASED_SEMVER_GIT:-none}"
-          echo "  MajorMinorPatch: ${RELEASED_MMP:-none}"
-          echo "  MajorMinor:      ${RELEASED_MM:-none}"
-          echo "  Major:           ${RELEASED_M:-none}"
-          echo "::endgroup::"
-
-          echo "::group::GitVersion Tags Output"
-          LATEST_SEMVER="v${{ needs.version.outputs.version }}"
-          LATEST_MMP="v${{ needs.version.outputs.majorMinorPatch }}"
-          LATEST_MM="v${{ needs.version.outputs.major }}.${{ needs.version.outputs.minor }}"
-          LATEST_M="v${{ needs.version.outputs.major }}"
-
-          echo ""
-          echo "  SemVer:          ${LATEST_SEMVER:-none}"
-          echo "  MajorMinorPatch: ${LATEST_MMP:-none}"
-          echo "  MajorMinor:      ${LATEST_MM:-none}"
-          echo "  Major:           ${LATEST_M:-none}"
-          echo "::endgroup::"
-
-          echo "::group::Relased Configuration"
-          # Step outputs consumed by subsequent steps (Build Changelog
-          # uses released-semver for fromTag, next-semver for toTag).
-          # On first-ever release, released-semver is empty — callers
-          # must handle that (mikepenz/release-changelog-builder-action
-          # treats empty fromTag as "auto-detect" and falls back to
-          # the config's empty_template if no PRs are found).
-          # We use the git tag (RELEASED_SEMVER_GIT) rather than the
-          # GitHub release tag (RELEASED_SEMVER_TAG) so that releases
-          # work even before the first gh release create succeeds.
-          IS_FIRST_RELEASE="false"
-          if [[ -z "${RELEASED_SEMVER_GIT}" ]]; then
-            IS_FIRST_RELEASE="true"
-          fi
-          {
-            echo "released-semver=${RELEASED_SEMVER_GIT:-}"
-            echo "next-semver=v${{ needs.version.outputs.version }}"
-            echo "is-first-release=${IS_FIRST_RELEASE}"
-          } >> "$GITHUB_OUTPUT"
           echo "::endgroup::"
 
       - name: Find Associated PR
@@ -754,6 +691,7 @@ jobs:
   publish:
     name: Publish
     needs: [release]
+    if: ${{ success() && needs.release.result == 'success' && github.ref_name == github.event.repository.default_branch }}
     permissions:
       actions: read
       contents: write
@@ -775,6 +713,9 @@ jobs:
       dry-run: ${{ inputs.dry-run || 'false' }}
     secrets: inherit
 
+  # ──────────────────────────────────────────────
+  #  7.  Generate the CHANGELOG.md for the release that actually shipped
+  # ──────────────────────────────────────────────
   changelog:
     name: Changelog
     needs: [release, publish]
