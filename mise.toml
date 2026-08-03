@@ -1576,8 +1576,48 @@ docker image rm "$TAG" > /dev/null 2>&1 || true
 '''
 shell = "bash -c"
 
+[tasks."test:conformance"]
+alias = ["conformance", "yaml-suite", "test:yaml-suite"]
+description = "Run the official YAML test suite and the round-trip fidelity property against the pinned snapshot, without coverage instrumentation"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+if [ "${usage_verbose:-false}" = "true" ]; then set -x; fi
+
+# GUARD, and the reason this task exists. Both harnesses open with
+# `if !data_dir.exists() { return; }`, so with the submodule directory absent
+# they PASS having asserted nothing -- a conformance gate that cannot fail.
+# `git worktree add` and a non-recursive `git clone` both leave the directory
+# present but EMPTY, which the in-test check does not catch either: there the
+# fidelity property fails with "only 0 faithful cases" and cargo aborts before
+# the conformance binary ever runs, so the 735-case result is silently skipped.
+# Checking for CONTENT rather than existence covers both.
+data="crates/glaucus-yaml-test-suite/data"
+if [ ! -d "${data}" ] || [ -z "$(ls -A "${data}" 2>/dev/null)" ]; then
+    echo "test:conformance: ${data} is missing or empty." >&2
+    echo "                  The suite is a git submodule pinned to yaml/yaml-test-suite." >&2
+    echo "                  Run: mise run setup:submodules" >&2
+    exit 1
+fi
+
+# `--nocapture` because the pass/fail counts are the point: the harness prints a
+# 735-case report to stderr that cargo would otherwise swallow on success.
+cargo test -p glaucus-yaml-test-suite \
+    --test yaml_test_suite --test round_trip_fidelity -- --nocapture
+'''
+shell = "bash -c"
+usage = '''
+flag "-v --verbose" help="Trace each command before running it (set -x)"
+'''
+
+# `depends` on the conformance run: `test` already executes both harnesses --
+# tarpaulin compiles every `[[test]]` target in the workspace -- but under
+# instrumentation, with the report captured and with no guard, so a missing
+# submodule degrades the conformance gate silently. Running it first costs ~0.2s
+# and makes that failure loud and actionable before coverage even starts.
 [tasks."test"]
-alias = ["t", "test"]
+alias = ["t", "cov", "coverage", "coverage:tarpaulin", "tarpaulin"]
 depends = []
 depends_post = []
 description = "Run the test suite under cargo-tarpaulin. Engine, outputs and ignores live in tarpaulin.toml — the single source of truth. Extra args after `--` pass through to tarpaulin."
@@ -1606,21 +1646,40 @@ flag "-t --threshold <threshold>" help="Coverage threshold" default="100" env="R
 arg "[args]" var=#true help="Extra arguments forwarded to cargo-tarpaulin (e.g. --out Html)"
 '''
 
-[tasks.coverage]
-alias = ["cov", "coverage:tarpaulin", "tarpaulin"]
+[tasks."test:all"]
+alias = ["ta"]
 depends = []
 depends_post = []
-description = "Measure production-code coverage with cargo-tarpaulin. All options (engine, outputs, ignores) live in tarpaulin.toml — the single source of truth — so this is a bare invocation."
+description = "Full gate: the coverage suite, then the YAML conformance and round-trip harnesses"
 run = '''
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
 
-mise run test --threshold "${usage_threshold?}"
+# Expanded with the `+` form, not a length test: an array-length expansion
+# opens a Tera comment in a mise run block and fails to render. A bare
+# "${args[@]}" is also an unbound-variable error under `set -u` when empty.
+eval "args=(${usage_args:-})"
+
+# NO `depends` on test:conformance, deliberately. `depends` would run it before
+# this body, which then runs it again -- the whole 735-case suite twice. Calling
+# both here also fixes the order: coverage first, conformance second, and a
+# failure in either stops the run.
+if [ -z "${usage_args:-}" ]; then
+    mise run test --threshold "${usage_threshold?}"
+else
+    mise run test --threshold "${usage_threshold?}" -- "${args[@]}"
+fi
+
+# No passthrough here. `args` are tarpaulin's (`--out Html` and friends) and
+# test:conformance declares no positional arguments, so forwarding them fails
+# the whole task with "unexpected word: --out".
+mise run test:conformance
 '''
 shell = "bash -c"
 usage = '''
 flag "-t --threshold <threshold>" help="Coverage threshold" default="100" env="RUST_COVERAGE_THRESHOLD"
+arg "[args]" var=#true help="Extra arguments forwarded to cargo-tarpaulin (e.g. --out Html)"
 '''
 
 [tasks.codecov]
