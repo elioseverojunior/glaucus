@@ -710,7 +710,7 @@ jobs:
       # nothing. This job is already reachable only from a push to the default
       # branch (see the `release` job it needs), which is exactly the condition
       # under which a release SHOULD reach crates.io.
-      dry-run: ${{ inputs.dry-run || 'false' }}
+      dry-run: ${{ inputs.dry-run || false }}
     secrets: inherit
 
   # ──────────────────────────────────────────────
