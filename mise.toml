@@ -2374,15 +2374,15 @@ unset RUSTFLAGS
 [tasks."build:install"]
 alias = ["bs", "bi", "build:setup"]
 depends = []
-description = "cargo build --workspace"
+description = "This only build and install the glaucus locally."
 run = '''
 #!/usr/bin/env bash
 
 set -Eeuo pipefail
 
-mise run build --release
-chmod -v +x target/release/comply
-cp -rfv target/release/comply ~/.local/bin/
+cargo build --release -p glaucus --features cli
+chmod -v +x target/release/glaucus
+cp -rfv target/release/glaucus ~/.local/bin/
 '''
 shell = "bash -c"
 
@@ -2726,7 +2726,7 @@ run = '''
 set -Eeuo pipefail
 
 # Repo and branch are RESOLVED, not hardcoded. This read `repos/elioseverojunior/
-# comply/branches/main/protection` literally, so running it from a fork -- or
+# glaucus/branches/main/protection` literally, so running it from a fork -- or
 # after a rename -- rewrote protection on the upstream repository instead of the
 # one checked out, silently and with admin rights. `gh:env:protect` resolves the
 # same way; keep them consistent.
@@ -2798,7 +2798,7 @@ repo="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 checking="${usage_check:-false}"
 
 # The reviewer is resolved, not hardcoded: `gh:branch:protect` above hardcodes
-# elioseverojunior/comply and silently targets the wrong repository from a fork.
+# elioseverojunior/glaucus and silently targets the wrong repository from a fork.
 reviewer_login="$(gh api user -q .login)"
 reviewer_id="$(gh api user -q .id)"
 
