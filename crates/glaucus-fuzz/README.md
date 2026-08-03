@@ -8,7 +8,7 @@ SPDX-License-Identifier: MIT OR Apache-2.0
 
 **Coverage-guided fuzz targets for the Glaucus YAML pipeline** — libFuzzer harnesses that prove panic-freedom, lossless round-trips, and resource-limit enforcement on adversarial input.
 
-> **Dev-only.** This crate is **not** a workspace member. cargo-fuzz requires each fuzz crate to declare its own `[workspace]`, so `glaucus-fuzz/Cargo.toml` carries an empty `[workspace]` table and the root workspace excludes `crates/glaucus-fuzz`. It is never published (`publish = false`, `version = "0.0.1-1"`).
+> **Dev-only.** This crate is a workspace member and inherits the workspace version (`version.workspace = true`), so it moves with every release, but it is never published (`publish = false`). Each target under `fuzz_targets/` is declared as its own `[[bin]]` with `test = false` and `doc = false`, so the harnesses build without joining the test or documentation runs.
 
 Glaucus is a safety-first YAML 1.2.2 library. The guarantee that matters most for a parser is that **no input can crash it** — a panic on attacker-controlled YAML is a denial-of-service. These targets continuously feed mutated bytes through the scanner, parser, composer, CST, and serde bridge to flush out panics, debug-assertion failures, infinite loops, and round-trip divergence before they reach a release.
 

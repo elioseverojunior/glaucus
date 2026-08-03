@@ -381,9 +381,40 @@ assert_eq!(pod.kind, "Pod");
 assert_eq!(pod.metadata.labels["app"], "web");
 ```
 
+## Versioning and Releases
+
+Versions come from [GitVersion](https://gitversion.net) and are never hand-edited.
+
+The **crate version** is GitVersion's `MajorMinorPatch`: always a plain
+`MAJOR.MINOR.PATCH` with no pre-release part, so every release on crates.io is a
+stable one. GitVersion's `SemVer` is deliberately *not* used for it, because it
+appends the commits-since-last-release counter (`0.1.0-1`) — and under SemVer
+anything after the hyphen makes the whole version a **pre-release**. crates.io
+then offers no stable version at all, and `cargo add glaucus` silently resolves
+something else.
+
+A release on the default branch pushes four tags:
+
+| Tag | Example | Moves? |
+| --- | --- | --- |
+| `vX.Y.Z-N` | `v0.1.0-3` | No — a unique marker for that exact commit |
+| `vX.Y.Z` | `v0.1.0` | No — the release itself |
+| `vX.Y` | `v0.1` | Yes — newest patch in that minor line |
+| `vX` | `v0` | Yes — newest release in that major line |
+
+`vX.Y.Z-N` carries GitVersion's `SemVer`, so it names one point in history and
+can never collide with a later commit. The GitHub Release and the crates.io
+upload both use `vX.Y.Z`; the two shorter tags are floating pointers, so `v0`
+always resolves to the newest 0.x release.
+
+Cut a release with `mise run release:prepare`: it computes the next version,
+writes it into every file that restates it, and regenerates `CHANGELOG.md` under
+that heading. It refuses to run outside the default branch, where GitVersion
+labels versions with the branch name.
+
 ## Minimum Supported Rust Version
 
-Rust **1.92** or later (edition 2024).
+Rust **1.97** or later (edition 2024).
 
 ## License
 
