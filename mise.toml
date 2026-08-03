@@ -2038,31 +2038,29 @@ if [ -z "$version" ]; then
     exit 1
 fi
 
-# Refuse to cut a release from a non-mainline branch. The shape of `version`
-# can no longer detect this: `MajorMinorPatch` STRIPS the branch label, so a
-# feature branch yields a perfectly release-shaped `0.1.1` while GitVersion's
-# own SemVer reads `0.1.1-fix-version-major-minor-patch.1`. A regex over
-# MajorMinorPatch would therefore always pass and give false assurance.
+# Preparing a release ON A BRANCH is the supported flow, not an accident: bump
+# the version, open a PR, merge. This warns rather than refuses, because with
+# `MajorMinorPatch` the branch and the post-merge default branch agree.
 #
-# `PreReleaseLabel` is the field that actually carries the distinction: empty on
-# the default branch, the branch name anywhere else. Cutting elsewhere writes a
-# changelog heading and a tag for a version the release pipeline never produces.
+# They agree because the number is derived from the tags plus the
+# conventional-commit increment rules in GitVersion.yml -- NOT from commit
+# distance. A `fix/*` branch resolves through the `unknown` config with
+# `increment: Inherit`, so it inherits main's `Patch`, and a `feat:` commit then
+# triggers `minor-version-bump-message` exactly as it will once those same
+# commits sit on main. The label is the only thing that differs, and it only
+# reaches `SemVer`, which the release version no longer uses.
 #
-# A hard error only when WRITING. `--check` is the preview path and previewing
-# from a feature branch is legitimate, so there it warns and carries on.
+# It stays a warning because the assumption can break: if another branch merges
+# first carrying a breaking change, main will resolve higher than what was
+# written here. CI is the backstop -- version.yml refuses a non-release-shaped
+# version and publish only runs on the default branch -- so the cost is a stale
+# number in a PR, caught before it ships.
 label="$(mise run version:json | jq -r '.PreReleaseLabel // empty')"
 if [ -n "${label}" ]; then
-    if [ "$checking" = true ]; then
-        printf 'warning: on branch-labelled version "%s" (label %s); previewing only.\n' \
-            "$(mise run version:json | jq -r .SemVer)" "${label}" >&2
-        printf '         Cut the real release from the default branch.\n\n' >&2
-    else
-        printf 'release:prepare: refusing to cut v%s from a non-default branch (GitVersion label "%s").\n' \
-            "$version" "${label}" >&2
-        printf '                 MajorMinorPatch hides the label, so this would look like a clean\n' >&2
-        printf '                 release while the pipeline never produces it. Use --check to preview.\n' >&2
-        exit 1
-    fi
+    printf 'note: preparing v%s from branch-labelled "%s" (GitVersion label "%s").\n' \
+        "$version" "$(mise run version:json | jq -r .SemVer)" "${label}" >&2
+    printf '      MajorMinorPatch matches what the default branch resolves once merged.\n' >&2
+    printf '      Re-check after merging if another release lands first.\n\n' >&2
 fi
 
 if [ "$checking" = true ]; then
