@@ -249,11 +249,13 @@ jobs:
     # artifact passes between them -- so waiting on it served no purpose beyond
     # serialising the two longest jobs. `release` below now depends on both, so
     # the gate is unchanged: a failing test still blocks the release.
-    needs: [setup, version]
+    needs: [setup, version, lint, sast]
     if: >
       success()
       && needs.setup.result == 'success'
       && needs.version.result == 'success'
+      && needs.lint.result == 'success'
+      && needs.sast.result == 'success'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
@@ -712,75 +714,3 @@ jobs:
       # under which a release SHOULD reach crates.io.
       dry-run: ${{ inputs.dry-run || false }}
     secrets: inherit
-
-  # ──────────────────────────────────────────────
-  #  7.  Generate the CHANGELOG.md for the release that actually shipped
-  # ──────────────────────────────────────────────
-  changelog:
-    name: Changelog
-    needs: [release, publish]
-    # A job, not a step, so it runs AFTER publish -- the changelog then records a
-    # release that actually reached crates.io. Gated here rather than per-step:
-    # the whole job is meaningless off the default branch.
-    if: ${{ success() && github.ref_name == github.event.repository.default_branch }}
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
-    permissions:
-      contents: write
-    steps:
-      # Checks out the DEFAULT BRANCH, not the tag: this commit lands on main.
-      # Full history and tags, because git-cliff derives the changelog from them.
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          fetch-depth: 0
-          fetch-tags: "true"
-          token: ${{ secrets.GITHUB_TOKEN || github.token }}
-
-      # Provides mise and, through it, git-cliff -- the same task the rest of the
-      # repository uses, so the tool and its config are declared in one place.
-      - name: Setup Environment
-        uses: ./.github/actions/setup-rust-env
-
-      # Regenerated AFTER the release exists, so the changelog is cut from the
-      # tag that actually shipped rather than from a local guess at the next
-      # version. `release:prepare` deliberately no longer writes this file.
-      - name: Commit CHANGELOG.md
-        shell: bash
-        env:
-          VERSION: v${{ needs.release.outputs.version }}
-          BRANCH: ${{ github.event.repository.default_branch }}
-        run: |
-          set -Eeuo pipefail
-
-          echo "::group::Generating CHANGELOG.md for ${VERSION}"
-          # NO `--latest` here. That selector emits a SINGLE release section, so
-          # writing it to CHANGELOG.md would replace the entire history with just
-          # this release, on every release (verified: 1 section against 2 for the
-          # full document). `--latest` belongs on RELEASE_NOTES.md, which is a
-          # per-release body. `--tag` files the unreleased commits under the
-          # version being cut instead of leaving them under [Unreleased].
-          mise run changelog --tag "${VERSION}"
-          echo "::endgroup::"
-
-          echo "::group::Committing CHANGELOG.md"
-          # Scoped to the one file, in both the test and the staging. A bare
-          # `git diff` would react to anything else dirty in the tree at this
-          # point, and `git commit -a` would sweep it into a commit that is meant
-          # to carry one generated file.
-          if git diff --quiet -- CHANGELOG.md; then
-            echo "CHANGELOG.md already current for ${VERSION}; nothing to commit"
-          else
-            git diff -- CHANGELOG.md
-
-            # Nothing else in this job configures an identity, so `git commit`
-            # would fail with "Author identity unknown".
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            git add CHANGELOG.md
-            git commit -m "chore: update CHANGELOG.md for ${VERSION} [skip ci]"
-            git push origin "HEAD:${BRANCH}"
-            echo "CHANGELOG.md committed to ${BRANCH}"
-          fi
-          echo "::endgroup::"
