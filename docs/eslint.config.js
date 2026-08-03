@@ -45,6 +45,20 @@ export default [
     ],
   },
   js.configs.recommended,
+  // Build-time Node scripts, which are tooling rather than part of the shipped
+  // bundle. They need Node's globals (`process`, `console`), but they are plain
+  // ESM and must NOT go through the TypeScript parser, so this cannot simply be
+  // folded into the `**/*.ts` block below.
+  {
+    files: ["**/*.mjs"],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: "module",
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
   {
     files: ["**/*.ts"],
     languageOptions: {

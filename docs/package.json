@@ -12,7 +12,7 @@
   },
   "scripts": {
     "dev": "vitepress dev .",
-    "build": "vitepress build .",
+    "build": "vitepress build . && node .vitepress/check-nav-links.mjs",
     "preview": "vitepress preview . --port ${DOCS_PORT:-5273}",
     "deps": "bunx --bun npm-check-updates -u --target minor && bun install",
     "deps:check": "bunx --bun npm-check-updates --target minor",

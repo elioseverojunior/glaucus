@@ -34,7 +34,7 @@ export default defineConfig({
   base,
   title: "glaucus",
   description:
-    "A GitHub Action that installs a Rust toolchain from your glaucus.toml and caches cargo in layers. A superset of dtolnay/glaucus that also replaces Swatinem/rust-cache.",
+    "Safe YAML for Rust: a native YAML 1.2 implementation with YAML 1.1 backward compatibility, zero unsafe by default and full spec compliance.",
   lang: "en-GB",
   cleanUrls: true,
   lastUpdated: true,
@@ -93,7 +93,7 @@ export default defineConfig({
       "meta",
       {
         property: "og:title",
-        content: "glaucus -- install Rust and cache cargo in one action",
+        content: "glaucus -- safe, spec-compliant YAML 1.2 for Rust",
       },
     ],
   ],
@@ -102,10 +102,18 @@ export default defineConfig({
     // Every entry below resolves to a page that exists in docs/. Add entries as
     // pages land, not before -- VitePress does not dead-link-check this block,
     // so an entry written ahead of its page builds clean and 404s in the browser.
+    //
+    // That was not a hypothetical: this promise sat here while all SEVEN
+    // entries below it pointed at pages copied from another project's docs
+    // (/ARCHITECTURE, /design/*-layered-cargo-cache, /plans/*), every one a 404
+    // on the published site, while the only two real pages were absent from the
+    // sidebar entirely. A comment cannot hold an invariant, so
+    // `.vitepress/check-nav-links.mjs` now runs as part of `bun run build` and
+    // fails the build on any entry here with no emitted page.
     nav: [
-      { text: "Architecture", link: "/ARCHITECTURE" },
-      { text: "Comparison", link: "/COMPARISON" },
-      { text: "Runbooks", link: "/RUNBOOKS" },
+      { text: "Troubleshooting", link: "/troubleshooting" },
+      { text: "Supply chain", link: "/supply-chain" },
+      { text: "Benchmarks", link: "/benchmarks/latest" },
       {
         text: "Repository",
         items: [
@@ -122,37 +130,17 @@ export default defineConfig({
 
     sidebar: [
       {
-        text: "Reference",
+        text: "Guide",
         items: [
-          { text: "Architecture", link: "/ARCHITECTURE" },
-          { text: "Comparison", link: "/COMPARISON" },
-          { text: "Runbooks", link: "/RUNBOOKS" },
+          { text: "Troubleshooting", link: "/troubleshooting" },
+          { text: "Supply chain", link: "/supply-chain" },
         ],
       },
       {
-        text: "Design records",
+        text: "Benchmarks",
         items: [
-          {
-            text: "Layered cargo cache",
-            link: "/design/2026-07-31-layered-cargo-cache",
-          },
-          {
-            text: "Layered cargo cache — Phase B",
-            link: "/design/2026-07-31-layered-cargo-cache-phase-b",
-          },
-        ],
-      },
-      {
-        text: "Implementation plans",
-        items: [
-          {
-            text: "Phase A",
-            link: "/plans/2026-07-31-layered-cargo-cache-phase-a",
-          },
-          {
-            text: "Phase B",
-            link: "/plans/2026-07-31-layered-cargo-cache-phase-b",
-          },
+          { text: "Latest", link: "/benchmarks/latest" },
+          { text: "Baseline", link: "/benchmarks/baseline" },
         ],
       },
     ],

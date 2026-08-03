@@ -2673,7 +2673,7 @@ run = "bun run dev"
 # `bun` runs where `package.json` is, which is `docs/`, not the repo root.
 alias = ["docsb"]
 depends = ["docs:install"]
-description = "Build the docs site into docs/.vitepress/dist. Set DOCS_BASE=/ for a custom domain; the default `/comply/` matches GitHub project pages"
+description = "Build the docs site into docs/.vitepress/dist. Set DOCS_BASE=/ for a custom domain; the default `/glaucus/` matches GitHub project pages"
 dir = "docs"
 run = '''
 #!/usr/bin/env bash
