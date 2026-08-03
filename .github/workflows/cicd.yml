@@ -13,6 +13,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Perform a dry run without publishing"
+        required: false
+        type: boolean
+        default: false
 
 permissions: read-all
 
@@ -486,8 +493,8 @@ jobs:
           }
           echo "::endgroup::"
 
-          echo "::group::Tagging Version v${{ needs.version.outputs.version }}"
-          tagger "v${{ needs.version.outputs.version }}"
+          echo "::group::Tagging Version v${{ needs.version.outputs.semVer }}"
+          tagger "v${{ needs.version.outputs.semVer }}"
           echo "::endgroup::"
 
           if [[ "${{ github.ref_name  }}" == "${{ github.event.repository.default_branch }}" && "${{ github.event_name }}" != "pull_request" ]];
@@ -581,67 +588,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "::endgroup::"
 
-      - name: Build Changelog
-        id: changelog
-        if: ${{ github.ref_name == github.event.repository.default_branch && steps.versions.outputs.is-first-release != 'true' }}
-        uses: mikepenz/release-changelog-builder-action@c9bcd8238b6f41e05561348339429d360b1c0247 # v6.2.3
-        with:
-          configuration: changelog-configuration.json
-          # `fromTag` is the git tag of the PREVIOUS semver release (computed
-          # from `git tag -l` in the Versions step). On the first-ever release
-          # this is empty — the action treats an empty fromTag as "no lower
-          # bound" and falls back to the config's `empty_template` when no
-          # PRs are found. Using the git tag (not the GitHub release tag)
-          # works even before the first `gh release create` succeeds.
-          fromTag: ${{ steps.versions.outputs.released-semver }}
-          toTag: ${{ steps.versions.outputs.next-semver }}
-          # Include pre-releases in the changelog range. Pre-release
-          # entries (e.g. v1.2.3-beta.1) count as "released" for the
-          # purpose of computing the diff from the previous release.
-          ignorePreReleases: "false"
-          # HYBRID mode: fetch merged PRs for their rich metadata
-          # (number, title, labels, author) AND include raw commits
-          # between tags that didn't land via PR. Matters for this
-          # repo because historical commits on main include direct
-          # pushes the default PR mode misses entirely — see run
-          # 24697992060, which emitted "No pull requests found"
-          # against a range of 8 real commits. With HYBRID, those
-          # commits appear as entries via their commit title (the
-          # same `label_extractor` regexes apply: feat:, fix:, chore:,
-          # test:, docs:, deps:), while future PR merges still get
-          # their PR-link template applied. Per upstream docs:
-          # "Hybrid mode treats commits like pull requests" —
-          # acceptable for this repo because we control the template
-          # and category mapping via changelog-configuration.json.
-          mode: "HYBRID"
-          # Use the GitHub App token (same identity that creates the
-          # release) so the action's PR lookups inherit the App's
-          # pulls:read permission and rate limit.
-          token: ${{ secrets.GITHUB_TOKEN || github.token }}
-          # Write the rendered changelog to a file at the repo root
-          # (relative to the checkout dir, per the action's docs).
-          # The Release step consumes it via `gh release create -F <file>`
-          # rather than piping through a multi-line env var — avoids
-          # both shell-escaping gotchas with the 4 KB+ markdown body
-          # AND GitHub Actions' 1 MB limit on `outputs.*` values when
-          # the changelog grows large. File is .gitignore'd.
-          outputFile: RELEASE_NOTES.md
-          # Keep failing on resolution errors (malformed config,
-          # unreachable tags, etc.) — the first-release empty-range
-          # case is handled by the config's empty_template, not by
-          # swallowing errors here.
-          failOnError: true
-
-      - name: Generate First Release Notes
-        id: first-release-notes
-        if: ${{ github.ref_name == github.event.repository.default_branch && steps.versions.outputs.is-first-release == 'true' }}
-        run: |
-          # For the very first release, there's no previous tag to diff
-          # against. The changelog action would auto-detect the initial
-          # commit and compare it to itself (same SHA), causing a 404.
-          # Instead, write the configured empty_template directly.
-          echo "No changes in this release" > RELEASE_NOTES.md
-
       - name: Find Associated PR
         id: find-pr
         if: ${{ github.ref_name != github.event.repository.default_branch }}
@@ -668,13 +614,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN || github.token }}
           script: |
-            const semVer = `v${{ needs.version.outputs.version }}`;
+            const version = `v${{ needs.version.outputs.version }}`;
+            const semVer = `v${{ needs.version.outputs.semVer }}`;
             const major = `${{ needs.version.outputs.major }}`;
             const minor = `${{ needs.version.outputs.minor }}`;
             const patch = `${{ needs.version.outputs.patch }}`;
             const shortSha = `${{ needs.version.outputs.shortSha }}`;
             const branch = `${{ steps.working-branch.outputs.branch }}`;
-            const tagUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/tree/${semVer}`;
+            const tagUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/tree/${version}`;
 
             const actor = `${{ github.actor }}`;
             const actorUrl = `${context.serverUrl}/${actor}`;
@@ -825,5 +772,74 @@ jobs:
       # nothing. This job is already reachable only from a push to the default
       # branch (see the `release` job it needs), which is exactly the condition
       # under which a release SHOULD reach crates.io.
-      dry-run: false
+      dry-run: ${{ inputs.dry-run || 'false' }}
     secrets: inherit
+
+  changelog:
+    name: Changelog
+    needs: [release, publish]
+    # A job, not a step, so it runs AFTER publish -- the changelog then records a
+    # release that actually reached crates.io. Gated here rather than per-step:
+    # the whole job is meaningless off the default branch.
+    if: ${{ success() && github.ref_name == github.event.repository.default_branch }}
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: write
+    steps:
+      # Checks out the DEFAULT BRANCH, not the tag: this commit lands on main.
+      # Full history and tags, because git-cliff derives the changelog from them.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          fetch-tags: "true"
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      # Provides mise and, through it, git-cliff -- the same task the rest of the
+      # repository uses, so the tool and its config are declared in one place.
+      - name: Setup Environment
+        uses: ./.github/actions/setup-rust-env
+
+      # Regenerated AFTER the release exists, so the changelog is cut from the
+      # tag that actually shipped rather than from a local guess at the next
+      # version. `release:prepare` deliberately no longer writes this file.
+      - name: Commit CHANGELOG.md
+        shell: bash
+        env:
+          VERSION: v${{ needs.release.outputs.version }}
+          BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -Eeuo pipefail
+
+          echo "::group::Generating CHANGELOG.md for ${VERSION}"
+          # NO `--latest` here. That selector emits a SINGLE release section, so
+          # writing it to CHANGELOG.md would replace the entire history with just
+          # this release, on every release (verified: 1 section against 2 for the
+          # full document). `--latest` belongs on RELEASE_NOTES.md, which is a
+          # per-release body. `--tag` files the unreleased commits under the
+          # version being cut instead of leaving them under [Unreleased].
+          mise run changelog --tag "${VERSION}"
+          echo "::endgroup::"
+
+          echo "::group::Committing CHANGELOG.md"
+          # Scoped to the one file, in both the test and the staging. A bare
+          # `git diff` would react to anything else dirty in the tree at this
+          # point, and `git commit -a` would sweep it into a commit that is meant
+          # to carry one generated file.
+          if git diff --quiet -- CHANGELOG.md; then
+            echo "CHANGELOG.md already current for ${VERSION}; nothing to commit"
+          else
+            git diff -- CHANGELOG.md
+
+            # Nothing else in this job configures an identity, so `git commit`
+            # would fail with "Author identity unknown".
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add CHANGELOG.md
+            git commit -m "chore: update CHANGELOG.md for ${VERSION} [skip ci]"
+            git push origin "HEAD:${BRANCH}"
+            echo "CHANGELOG.md committed to ${BRANCH}"
+          fi
+          echo "::endgroup::"
