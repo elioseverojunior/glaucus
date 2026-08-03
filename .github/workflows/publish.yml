@@ -675,6 +675,38 @@ jobs:
       # docs.rs URL in its summary. `validate` already resolved it.
       version: ${{ needs.validate.outputs.version }}
 
+  # ──────────────────────────────────────────────
+  #  Generate the CHANGELOG.md for the release that actually shipped
+  # ──────────────────────────────────────────────
+  changelog:
+    name: Changelog
+    # Mirrors the `gh-pages` job above: `validate` supplies the version and the
+    # should_publish verdict, `publish-crates` is the upload itself. The other
+    # jobs are already upstream of publish-crates, so naming them here would only
+    # couple the changelog to failures that cannot reach it -- a gh-pages outage
+    # should not stop the changelog for a release that shipped.
+    needs: [validate, publish-crates]
+    # `should_publish`, not the job results. Without `needs:` and `always()` this
+    # job is ALREADY skipped unless every dependency succeeded, so restating each
+    # `result == 'success'` adds nothing -- `summary` below needs them only
+    # because it uses `always()`. What the results cannot tell you is whether the
+    # run actually uploaded: `publish-crates` reports success on a DRY RUN too,
+    # so this is the one condition that distinguishes "released" from "rehearsed".
+    if: >
+      success()
+      && needs.validate.outputs.should_publish == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/changelog.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+      # EXPLICIT. `dry-run` defaults to TRUE in changelog.yml so a manual
+      # dispatch is safe by default; omitting it here would inherit that default
+      # and the job would render the diff and commit nothing -- green, and
+      # entirely pointless. This path only runs when a publish really happened.
+      dry-run: false
+    secrets: inherit
+
   summary:
     name: Publish Summary
     needs: [validate, package, provenance, sign, publish-crates, gh-pages]
