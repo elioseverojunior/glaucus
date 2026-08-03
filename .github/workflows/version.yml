@@ -18,8 +18,11 @@ on:
         description: "The full GitVersion object, PascalCase keys, MajorMinor added and the two Assembly fields removed -- the same shape `mise run version:json` prints"
         value: ${{ jobs.semver.outputs.json }}
       version:
-        description: "SemVer, e.g. 0.1.0-* -- the TAG when a tag ref triggered the run, otherwise GitVersion's derivation"
+        description: "Release version, e.g. 0.1.0 -- the TAG when a tag ref triggered the run, otherwise GitVersion's MajorMinorPatch"
         value: ${{ jobs.semver.outputs.version }}
+      semVer:
+        description: "Release version, e.g. 0.1.0-* -- the TAG when a tag ref triggered the run, otherwise GitVersion's SemVer, which appends CommitsSinceVersionSource as a pre-release identifier"
+        value: ${{ jobs.semver.outputs.semVer }}
       source:
         description: "Where `version` came from: `tag` or `gitversion`. On `tag` it has been cross-checked against Cargo.toml"
         value: ${{ jobs.semver.outputs.source }}
@@ -89,6 +92,7 @@ jobs:
       # changes.
       json: ${{ steps.resolved.outputs.json }}
       version: ${{ steps.resolved.outputs.version }}
+      semVer: ${{ steps.resolved.outputs.semVer }}
       major: ${{ steps.resolved.outputs.major }}
       minor: ${{ steps.resolved.outputs.minor }}
       patch: ${{ steps.resolved.outputs.patch }}
@@ -156,18 +160,26 @@ jobs:
             with_entries(.key |= (.[0:1] | ascii_upcase) + .[1:])
             | del(.AssemblySemVer, .AssemblySemFileVer)
             + {MajorMinor: "\(.Major).\(.Minor)"}')"
+          # `version` is MajorMinorPatch, NOT SemVer. SemVer appends
+          # CommitsSinceVersionSource as a pre-release identifier (`0.1.0-1`),
+          # which makes every published crate a SemVer PRE-RELEASE: crates.io
+          # then reports no stable version, `cargo add glaucus` resolved the
+          # empty `0.0.0` placeholder instead of the library, and `cargo install`
+          # never selected it without an explicit `--version`. The full SemVer
+          # string is still available to callers as `.SemVer` inside `json`.
           {
             echo "json=${json}"
-            echo "version=$(printf '%s' "${json}" | jq -r '.SemVer')"
+            echo "version=$(printf '%s' "${json}" | jq -r '.MajorMinorPatch')"
             echo "major=$(printf '%s' "${json}" | jq -r '.Major')"
             echo "minor=$(printf '%s' "${json}" | jq -r '.Minor')"
             echo "patch=$(printf '%s' "${json}" | jq -r '.Patch')"
             echo "majorMinor=$(printf '%s' "${json}" | jq -r '.MajorMinor')"
             echo "majorMinorPatch=$(printf '%s' "${json}" | jq -r '.MajorMinorPatch')"
             echo "preReleaseLabel=$(printf '%s' "${json}" | jq -r '.PreReleaseLabel')"
+            echo "semVer=$(printf '%s' "${json}" | jq -r '.SemVer')"
             echo "shortSha=$(printf '%s' "${json}" | jq -r '.ShortSha')"
           } >> "$GITHUB_OUTPUT"
-          printf '%s\n' "${json}" | jq -r '"Version: \(.SemVer) Major: \(.Major) MajorMinor: \(.MajorMinor) MajorMinorPatch: \(.MajorMinorPatch)"'
+          printf '%s\n' "${json}" | jq -r '"Version: \(.MajorMinorPatch) SemVer: \(.SemVer) Major: \(.Major) MajorMinor: \(.MajorMinor) MajorMinorPatch: \(.MajorMinorPatch)"'
 
       # THE TAG IS THE AUTHORITY. Whenever a tag ref triggered this run its name
       # IS the release, and GitVersion is only a derivation of it; letting the
@@ -192,13 +204,25 @@ jobs:
         run: |
           set -Eeuo pipefail
 
+          # GitVersion runs unconditionally in the step above, so its derivation
+          # exists on EVERY trigger -- tag included. That is what makes the tag
+          # checkable rather than merely trusted.
+          derived_mmp="$(printf '%s' "${COMPOSED}" | jq -r '.MajorMinorPatch')"
+          derived_semver="$(printf '%s' "${COMPOSED}" | jq -r '.SemVer')"
+
+          # `version` is what gets published and must equal Cargo.toml exactly.
+          # `semVer` ALWAYS comes from GitVersion -- on a tag exactly as much as
+          # off one. It is the derivation's own string, never a restatement of
+          # the ref: echoing the tag back would make the output agree with
+          # itself by construction and report nothing about what was derived.
           if [ "${REF_TYPE}" = "tag" ]; then
             version="${REF_NAME#v}"
             source="tag"
           else
-            version="$(printf '%s' "${COMPOSED}" | jq -r '.SemVer')"
+            version="${derived_mmp}"
             source="gitversion"
           fi
+          semVer="${derived_semver}"
 
           # Refuse anything that is not SemVer rather than carrying it onward.
           # A floating tag like `v0` or `v0.1` reaches this workflow the same way
@@ -217,6 +241,21 @@ jobs:
           prerelease="${version#"${core}"}"
           prerelease="${prerelease#-}"
           prerelease="${prerelease%%+*}"
+
+          # CONFIRM THE TAG AGAINST THE DERIVATION. The tag stays the authority,
+          # but a tag GitVersion does not also derive means the two disagree
+          # about history, and publishing on that basis ships a number the
+          # pipeline never computed. GitVersion reads tags as version sources, so
+          # on a tagged commit it should land on the same core -- when it does
+          # not, the usual cause is a tag that never reached the runner. That is
+          # why `fetch-depth: 0` and `fetch-tags` on the checkout above are
+          # load-bearing, and why this is an error rather than a warning: a
+          # silent disagreement here surfaces as a confusing crates.io rejection
+          # several jobs later.
+          if [ "${source}" = "tag" ] && [ "${core}" != "${derived_mmp}" ]; then
+            echo "::error::Tag '${REF_NAME}' names ${core}, but GitVersion derives ${derived_mmp} (SemVer ${derived_semver}). The tag and the history disagree; check that the tag was fetched and that it sits on this commit."
+            exit 1
+          fi
 
           # Cargo.toml is what `cargo publish` actually uploads, so a tag that
           # disagrees with it ships the wrong number under the right name. Gated
@@ -249,15 +288,19 @@ jobs:
             echo "majorMinorPatch=${core}"
             echo "preReleaseLabel=${prerelease}"
             echo "source=${source}"
+            echo "semVer=${semVer}"
             # Republished so `fromJSON(...json)` agrees with the named outputs.
             # Left unpatched, a caller reading `.SemVer` off the JSON would get
             # the derivation while `outputs.version` carried the tag.
             printf 'json=%s\n' "$(printf '%s' "${COMPOSED}" | jq -Sc \
-              --arg v "${version}" --arg mmp "${core}" --arg pre "${prerelease}" \
+              --arg v "${version}" --arg sem "${semVer}" --arg mmp "${core}" \
+              --arg pre "${prerelease}" \
               --argjson maj "${major}" --argjson min "${minor}" --argjson pat "${patch}" \
-              '. + {SemVer: $v, MajorMinorPatch: $mmp, PreReleaseLabel: $pre,
+              '. + {Version: $v, SemVer: $sem, MajorMinorPatch: $mmp,
+                    PreReleaseLabel: $pre,
                     Major: $maj, Minor: $min, Patch: $pat,
                     MajorMinor: "\($maj).\($min)"}')"
           } >> "$GITHUB_OUTPUT"
 
-          printf 'Authoritative version: %s (source: %s)\n' "${version}" "${source}"
+          printf 'Authoritative version: %s (semVer: %s, source: %s)\n' \
+            "${version}" "${semVer}" "${source}"
