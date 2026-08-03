@@ -109,7 +109,7 @@ sort_commits = "oldest"
 topo_order = false
 # Regex to match the tags that mark releases. The `v` prefix is optional so
 # both `git cliff --bump` (bare semver) and explicit `vX.Y.Z` tags are accepted.
-tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9]+.*)?$"
+tag_pattern = "^v[0-9]+\\.[0-9]+\\.[0-9]+(-.*)?$"
 
 [bump]
 # Derive the next version from conventional commit types when using `--bump`.
