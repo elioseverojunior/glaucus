@@ -150,7 +150,106 @@ jobs:
           category: "/language:rust"
 
   # ──────────────────────────────────────────────
-  #  5. Test
+  #  5.  MSRV — compile at the DECLARED minimum
+  # ──────────────────────────────────────────────
+  # The job that keeps `rust-version` honest. Without it an MSRV is a claim, not
+  # a constraint: every other job here builds with rust-toolchain.toml's pin, so
+  # the declared floor can only ever drift UPWARD, and always silently -- the
+  # pinned toolchain never disagrees with it. That is exactly how the workspace
+  # came to advertise 1.97 while the code still compiled on 1.88, making every
+  # routine toolchain bump an invisible breaking change for consumers (issue #3).
+  msrv:
+    name: MSRV
+    # First tier, alongside `lint`/`sast`, rather than downstream of them: this
+    # is one `cargo check`, and a broken floor should surface in three minutes
+    # instead of behind the full test-and-build chain.
+    needs: [setup, version]
+    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+
+      # READ the floor; never hardcode it. A literal version here would be a
+      # second source of truth free to disagree with Cargo.toml -- the same class
+      # of bug this job exists to catch, just relocated into the workflow.
+      - name: Read declared MSRV from Cargo.toml
+        id: msrv
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^rust-version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -n1)"
+          if [ -z "$version" ]; then
+            echo "::error file=Cargo.toml::no rust-version found in [workspace.package]"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Declared MSRV: ${version}"
+
+      # Naming `toolchain` makes the action export RUSTUP_TOOLCHAIN, which
+      # outranks rust-toolchain.toml for the whole job. That override IS the job.
+      # `cache-key-suffix` keeps this toolchain's artifacts out of the caches the
+      # stable-pinned jobs populate.
+      - name: Setup Environment
+        uses: ./.github/actions/setup-rust-env
+        with:
+          toolchain: ${{ steps.msrv.outputs.version }}
+          cache-key-suffix: msrv
+
+      - name: Compile every publishable crate at the MSRV
+        env:
+          # Drops the `-D warnings` that .cargo/config.toml sets, and it must be
+          # RUSTFLAGS rather than `--config build.rustflags=[]`: the config file
+          # sets rustflags under `[target.<triple>]`, which REPLACES the
+          # `[build]` list rather than merging with it, so overriding `build`
+          # would change nothing on this runner. The env var outranks both.
+          #
+          # Dropping it is deliberate. This gate answers "does the code compile
+          # on the declared floor", not "is it lint-clean on a compiler nine
+          # releases old" -- and those differ: an `#[allow]` naming a lint that
+          # 1.88 has not heard of raises `unknown_lints`, which `-D warnings`
+          # would turn into a failure that says nothing about MSRV. `lint` runs
+          # on the pinned toolchain and owns the warning gate.
+          #
+          # No linker flags are lost that matter: `cargo check` never links.
+          RUSTFLAGS: "-D warnings"
+        run: |
+          set -euo pipefail
+          # Derive the crate list instead of maintaining `--exclude` flags:
+          # cargo reports `publish` as [] for `publish = false` and null when
+          # publishing is allowed, so this selects exactly what a consumer can
+          # install from crates.io -- and a crate added tomorrow is covered the
+          # day it lands rather than escaping the gate until someone notices.
+          #
+          # bench/fuzz/yaml-test-suite are excluded by that rule, which is the
+          # point: dev-only crates drag in criterion, tarpaulin and a nightly
+          # requirement, and their floors are not part of the promise made to
+          # consumers. For the same reason this is `check`, not `test` -- running
+          # the suite would let a dev-dependency dictate the published MSRV.
+          mapfile -t names < <(
+            cargo metadata --format-version 1 --no-deps \
+              | jq -r '.packages[] | select(.publish != []) | .name' | sort
+          )
+          if [ "${#names[@]}" -eq 0 ]; then
+            echo "::error::no publishable crates resolved; refusing to pass vacuously"
+            exit 1
+          fi
+          packages=()
+          for name in "${names[@]}"; do packages+=(--package "${name}"); done
+          echo "MSRV $(rustc --version)"
+          printf 'Checking %s\n' "${names[@]}"
+          # `--all-features` because the floor has to hold for every feature a
+          # consumer can switch on; a default-only check would let an optional
+          # dependency raise the real MSRV without ever failing here.
+          cargo check --locked --all-features "${packages[@]}"
+
+  # ──────────────────────────────────────────────
+  #  6. Test
   # ──────────────────────────────────────────────
   # Tests and coverage are one job because they are one command: tarpaulin
   # builds and runs the suite to instrument it, so a separate `mise run test`
@@ -238,7 +337,7 @@ jobs:
           tool-name: "Tarpaulin"
 
   # ──────────────────────────────────────────────
-  #  5.  Build
+  #  7.  Build
   # ──────────────────────────────────────────────
   build:
     name: Build
@@ -383,16 +482,21 @@ jobs:
           echo "::endgroup::"
 
   # ──────────────────────────────────────────────
-  #  6.  Release
+  #  8.  Release
   # ──────────────────────────────────────────────
   release:
     name: Release
-    needs: [tests, build, version]
+    # `msrv` is named here, not just left to run alongside, because this job is
+    # the last point before crates reach crates.io. A published crate whose
+    # `rust-version` is a lie is the failure the MSRV gate exists to prevent, and
+    # a gate that cannot block the release does not prevent anything.
+    needs: [tests, build, version, msrv]
     if: >
       success()
       && needs.tests.result == 'success'
       && needs.build.result == 'success'
       && needs.version.result == 'success'
+      && needs.msrv.result == 'success'
       && github.ref_name == github.event.repository.default_branch
       && github.event_name == 'push'
     runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
@@ -680,7 +784,7 @@ jobs:
             --latest
 
   # ──────────────────────────────────────────────
-  #  6.  Publish — package, attest, sign, publish
+  #  9.  Publish — package, attest, sign, publish
   # ──────────────────────────────────────────────
   # Invoked rather than triggered. `release` above pushes the tag with
   # GITHUB_TOKEN, and GitHub does not raise workflow-triggering events for that
