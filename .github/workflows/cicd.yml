@@ -191,32 +191,69 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "Declared MSRV: ${version}"
 
-      # Naming `toolchain` makes the action export RUSTUP_TOOLCHAIN, which
-      # outranks rust-toolchain.toml for the whole job. That override IS the job.
-      # `cache-key-suffix` keeps this toolchain's artifacts out of the caches the
-      # stable-pinned jobs populate.
-      - name: Setup Environment
-        uses: ./.github/actions/setup-rust-env
-        with:
-          toolchain: ${{ steps.msrv.outputs.version }}
-          cache-key-suffix: msrv
+      # Deliberately NOT ./.github/actions/setup-rust-env, which every other job
+      # here uses. That action provisions the DEVELOPMENT environment -- mold,
+      # clippy/rustfmt/llvm-tools, cargo-binstall, every mise `cargo:` tool,
+      # comply and ignorefile -- and it builds that tooling with whatever
+      # toolchain is active. Pointing it at the MSRV therefore tried to compile
+      # the tooling with 1.88, and it died on the first tool that had moved on:
+      #
+      #   error: cannot install package `ignorefile-cli 0.1.0`, it requires
+      #   rustc 1.95 or newer, while the currently active rustc version is 1.88.0
+      #
+      # None of that tooling is part of the promise made to consumers, and a gate
+      # that fails because a lint helper wants a newer compiler reports nothing
+      # about the MSRV. So this job installs rustc and cargo at the declared
+      # floor and nothing else. rustup ships preinstalled on GitHub runners.
+      #
+      # Dropping the composite drops mold with it, which is why the step below
+      # must name RUSTFLAGS. See there.
+      #
+      # No target cache either: the gate's worth is its reliability, not its
+      # speed, it runs in the first tier in parallel, and `tests`/`build` set the
+      # critical path regardless. Add one only if this ever becomes the slow job.
+      - name: Install the declared MSRV toolchain
+        env:
+          MSRV: ${{ steps.msrv.outputs.version }}
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$MSRV" --profile minimal --no-self-update
+          rustup run "$MSRV" rustc --version
 
       - name: Compile every publishable crate at the MSRV
         env:
-          # Drops the `-D warnings` that .cargo/config.toml sets, and it must be
-          # RUSTFLAGS rather than `--config build.rustflags=[]`: the config file
-          # sets rustflags under `[target.<triple>]`, which REPLACES the
-          # `[build]` list rather than merging with it, so overriding `build`
-          # would change nothing on this runner. The env var outranks both.
+          # Selects the toolchain installed above for every cargo/rustc call in
+          # this step; it outranks rust-toolchain.toml. This is the override that
+          # makes the job mean anything.
+          RUSTUP_TOOLCHAIN: ${{ steps.msrv.outputs.version }}
+          # REQUIRED, not tidiness. .cargo/config.toml's
+          # `[target.x86_64-unknown-linux-gnu]` sets
+          # `["-D", "warnings", "-C", "link-arg=-fuse-ld=mold"]`, and mold is
+          # installed by setup-rust-env -- which this job deliberately does not
+          # run. A RUSTFLAGS env var REPLACES that list rather than merging into
+          # it, so naming the flag here keeps the warning policy byte-for-byte
+          # while dropping a linker that is not on this runner.
           #
-          # Dropping it is deliberate. This gate answers "does the code compile
-          # on the declared floor", not "is it lint-clean on a compiler nine
-          # releases old" -- and those differ: an `#[allow]` naming a lint that
-          # 1.88 has not heard of raises `unknown_lints`, which `-D warnings`
-          # would turn into a failure that says nothing about MSRV. `lint` runs
-          # on the pinned toolchain and owns the warning gate.
+          # `cargo check` does NOT get a pass on that: it still builds and RUNS
+          # build scripts, and still compiles proc-macro crates, both of which
+          # link. This graph has ~30 of them (serde_derive, proc-macro2, quote,
+          # wasm-bindgen-macro, ...). Delete this line and the job fails at the
+          # first one, for a reason that has nothing to do with the MSRV.
           #
-          # No linker flags are lost that matter: `cargo check` never links.
+          # No `--target` is passed, so RUSTFLAGS reaches those host artifacts
+          # too, which is exactly what makes the override work.
+          #
+          # Warnings stay denied AT THE FLOOR because `lint` cannot cover this:
+          # it runs on the pinned toolchain, so a lint that fires on 1.88 but was
+          # renamed or removed by the pin would go unseen. Verified clean -- the
+          # check below passes with zero warnings on 1.88.
+          #
+          # The trade-off to watch as the floor and stable drift apart: an
+          # `#[allow]` naming a lint 1.88 has never heard of raises
+          # `unknown_lints`, which would fail a gate that blocks `release` for a
+          # reason that says nothing about MSRV. If that day comes, set this to
+          # "" rather than weakening the compile check -- `lint` still owns the
+          # warning gate on the pinned toolchain.
           RUSTFLAGS: "-D warnings"
         run: |
           set -euo pipefail
