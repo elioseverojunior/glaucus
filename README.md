@@ -9,7 +9,7 @@ SPDX-License-Identifier: MIT OR Apache-2.0
 **Safe YAML for Rust** — zero `unsafe` by default, full YAML 1.2.2 spec compliance, high performance.
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
-[![Rust](https://img.shields.io/badge/rust-1.97%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
 [![codecov](https://codecov.io/gh/elioseverojunior/glaucus/graph/badge.svg?token=WLtZC4tMKB)](https://codecov.io/gh/elioseverojunior/glaucus)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/elioseverojunior/glaucus/badge)](https://securityscorecards.dev/viewer/?uri=github.com/elioseverojunior/glaucus)
 [![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://slsa.dev)
@@ -426,7 +426,19 @@ release that fails to publish leaves no changelog entry claiming otherwise.
 
 ## Minimum Supported Rust Version
 
-Rust **1.97** or later (edition 2024).
+Rust **1.88** or later (edition 2024).
+
+Edition 2024 alone would allow 1.85, and no dependency requires more than that,
+but the parser uses let-chains — stabilised in 1.88 — so that is the real floor.
+
+The MSRV is the version declared in `rust-version` (`Cargo.toml`), and CI
+compiles every publishable crate with exactly that toolchain on every run, so
+the number is verified rather than asserted. It is independent of
+`rust-toolchain.toml`, which pins the toolchain the project is *developed* with
+and tracks stable.
+
+Raising the MSRV is a **minor** version bump accompanied by a `CHANGELOG.md`
+entry — never a patch release.
 
 ## License
 

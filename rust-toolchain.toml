@@ -3,8 +3,19 @@
 # SPDX-License-Identifier: MIT OR Apache-2.0
 
 # Canonical Rust toolchain definition (read by rustup, cargo, IDEs, and mise).
-# This is the single source of truth for the toolchain version; keep it in sync
-# with `rust-version` in Cargo.toml.
+# This is the single source of truth for the DEVELOPMENT toolchain, and it tracks
+# stable.
+#
+# It is deliberately DECOUPLED from `rust-version` in Cargo.toml, which is a
+# different promise: the oldest rustc a CONSUMER needs. Keeping the two "in
+# sync" -- as this comment used to instruct -- is exactly what pushed the
+# published MSRV to 1.97 while the code still compiled on 1.88, turning every
+# routine toolchain bump into a silent breaking change downstream (issue #3).
+#
+# So: bump this freely to pick up new compiler features and lints. Only change
+# `rust-version` when the code genuinely stops building on the old floor, and
+# treat that as a minor version bump. The `MSRV` job in cicd.yml enforces the
+# gap by compiling against `rust-version`, not against this file.
 [toolchain]
 channel = "1.97"
 profile = "default"

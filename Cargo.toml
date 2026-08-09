@@ -18,7 +18,21 @@ keywords = ["configuration", "markup", "parser", "serialization", "yaml"]
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/elioseverojunior/glaucus"
-rust-version = "1.97"
+# The CONSUMER contract: the oldest rustc that can compile the published crates.
+# Deliberately NOT tied to `rust-toolchain.toml`, which pins the toolchain this
+# repo is DEVELOPED with and tracks stable. Slaving the two is how this drifted
+# to 1.97 (nine releases above what the code needs) without anyone noticing --
+# every dev-toolchain bump silently broke downstream consumers. See issue #3.
+#
+# 1.88 is the floor the code actually requires, not a guess: edition 2024 needs
+# 1.85, the whole non-dev dependency graph tops out at 1.85, but let-chains
+# (`if cond && let Some(x) = ...`) stabilised in 1.88 and are used in the
+# scanner, the schema validator and the composer. 1.87 fails with E0658.
+#
+# The `MSRV` job in .github/workflows/cicd.yml reads THIS value and compiles
+# every publishable crate with it, so the number cannot drift again. Raising it
+# is a MINOR version bump with a CHANGELOG entry, never a patch.
+rust-version = "1.88"
 version = "0.2.0"
 
 [workspace.lints.rust]
