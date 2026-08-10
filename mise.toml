@@ -915,10 +915,21 @@ set -Eeuo pipefail
 # GitVersion's derivation for the NEXT release, which the committed files only
 # adopt when a bump is actually cut.
 #
-# Only files that CLAIM the current version are listed below. mise.toml holds
-# nine `v0.0.1-1` strings that are examples in help text ("e.g. v0.0.1-1"); a
-# repo-wide scan would rewrite those on a bump and corrupt the documentation.
-# Member crates carry `version.workspace = true` and cannot drift at all.
+# Only files that CLAIM the current version are touched. mise.toml holds nine
+# `v0.0.1-1` strings that are examples in help text ("e.g. v0.0.1-1"); a
+# repo-wide SUBSTITUTION would rewrite those on a bump and corrupt the
+# documentation. Member crates carry `version.workspace = true` and cannot drift
+# at all.
+#
+# Two sites below do enumerate files rather than name them -- the local
+# dependency table, and markdown install snippets -- because a listed set goes
+# stale the moment a crate or a README is added, and an ungated site is the
+# failure this task exists to prevent. That is not in tension with the paragraph
+# above: what makes a scan dangerous is an unanchored PATTERN, not a discovered
+# FILE SET. Each enumerating site pins its match to a shape only a real
+# declaration can have (`^<crate> = "`), so the version-shaped strings that must
+# survive -- CHANGELOG headings, the glaucus-cst README example whose assertion
+# depends on its digits -- are never candidates in the first place.
 anchor="$(taplo get -f Cargo.toml '.workspace.package.version')"
 checking="${usage_check:-false}"
 from_git="${usage_from_git:-false}"
@@ -1036,6 +1047,44 @@ for doc in docs/reference/cli.md; do
             "s|v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|v${anchor}|g"
     fi
 done
+
+# Install snippets restate the version as a Cargo REQUIREMENT, which is a
+# different string from the anchor and from the tag-style `v` form above:
+# `glaucus = "0.2"`, not `"0.2.1"` and not `"v0.2.1"`.
+#
+# The requirement that belongs in a README is the LOOSEST one that still
+# excludes breaking changes -- exactly what `serde = { version = "1" }` sitting
+# beside it already does. Cargo reads `0.2` as `>=0.2.0, <0.3.0` and `1` as
+# `>=1.0.0, <2.0.0`, so while the crate is 0.x that means `0.MINOR` (a 0.x minor
+# bump IS breaking) and bare `MAJOR` from 1.0 on. Pinning the full `0.2.1` would
+# be narrower than a consumer needs AND would rewrite every README on every
+# patch release, which is churn that exists only to be got wrong later.
+case "$anchor" in
+    0.*) req="${anchor%.*}" ;;
+    *) req="${anchor%%.*}" ;;
+esac
+
+# Discovered rather than listed, like the dependency table above, so a README
+# added tomorrow is gated the day it lands instead of quietly going unchecked.
+#
+# The `^` anchor is the whole safety argument and it is doing real work. This
+# repository is full of version-shaped strings that MUST NOT be rewritten:
+# CHANGELOG.md's release headings and compare links (`## [0.2.0](...)`), and
+# glaucus-cst's README example `Document::parse("version: 0.0.1  # keep me\n")`
+# whose very next line asserts on those exact digits. Requiring the line to
+# START with the crate name and ` = "` matches the dependency-table form alone,
+# so both survive untouched -- verified by running the match across every
+# tracked markdown file and getting back only the two install snippets.
+while IFS= read -r doc; do
+    [ -e "$doc" ] || continue
+    found="$(sed -nE 's/^glaucus[a-z-]* = "([^"]+)".*/\1/p' "$doc" | sort -u | tr '\n' ' ')"
+    found="${found% }"
+    [ -n "$found" ] || continue
+    if stale "${doc} glaucus requirement" "$found" "$req"; then
+        [ "$checking" = true ] || edit "$doc" \
+            "s|^(glaucus[a-z-]* = \")[^\"]*(\")|\1${req}\2|"
+    fi
+done < <(git ls-files '*.md')
 
 if [ "$drift" -ne 0 ]; then
     echo "Run \`mise run version:sync\` to align them with Cargo.toml." >&2
