@@ -124,8 +124,22 @@ local linters = new Mapping<String, Step> {
     // `mise run version` is not involved -- GitVersion's SemVer carries
     // CommitsSinceVersionSource and so advances on every commit, which no
     // committed file can be gated against. `version:sync` writes the fix.
+    //
+    // Markdown is globbed WIDE rather than naming the two READMEs that restate
+    // the version today, because a named pair is a list that goes stale: the
+    // next README to gain an install snippet would be ungated locally and only
+    // caught in CI. `version:sync` already discovers markdown with
+    // `git ls-files`, so listing files here would contradict the task it runs.
+    // Both `*.md` and `**/*.md` appear because the two are not interchangeable
+    // in this file -- `**/Cargo.toml` above exists precisely because the bare
+    // form does not reach nested paths, and the restatements live at BOTH the
+    // repo root and under crates/.
+    //
+    // `docs/reference/cli.md` is no longer named: the markdown globs cover it.
+    // The cost of widening is one 0.9s task on any markdown commit, which buys
+    // the same answer locally that CI would otherwise deliver minutes later.
     ["version-sync"] = new Step {
-        glob = "{Cargo.toml,docs/package.json,docs/reference/cli.md}"
+        glob = "{Cargo.toml,docs/package.json,*.md,**/*.md}"
         check = "mise run version:check"
     }
 
