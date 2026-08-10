@@ -188,8 +188,31 @@ jobs:
             echo "::error file=Cargo.toml::no rust-version found in [workspace.package]"
             exit 1
           fi
+
+          # Two files declare the floor to two different tools, and they have to
+          # agree. Cargo.toml's `rust-version` is the promise to consumers and
+          # what this job compiles against; .clippy.toml's `msrv` is what makes
+          # clippy REJECT an API newer than the floor even though the pinned
+          # toolchain offers it -- a check that catches at lint time what this
+          # job only catches once the code is written.
+          #
+          # Nothing else compares them. Left unchecked, .clippy.toml silently
+          # keeps linting against a floor the project abandoned, which is the
+          # exact defect this job exists to prevent, one file over. A missing
+          # `msrv` is failed too, not tolerated: dropping the key would quietly
+          # switch clippy back to assuming the pinned toolchain.
+          clippy_msrv="$(sed -n 's/^msrv[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' .clippy.toml | head -n1)"
+          if [ -z "$clippy_msrv" ]; then
+            echo "::error file=.clippy.toml::no msrv key; it must declare msrv = \"${version}\" to match Cargo.toml"
+            exit 1
+          fi
+          if [ "$clippy_msrv" != "$version" ]; then
+            echo "::error file=.clippy.toml::msrv \"${clippy_msrv}\" disagrees with Cargo.toml rust-version \"${version}\""
+            exit 1
+          fi
+
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "Declared MSRV: ${version}"
+          echo "Declared MSRV: ${version} (Cargo.toml and .clippy.toml agree)"
 
       # Deliberately NOT ./.github/actions/setup-rust-env, which every other job
       # here uses. That action provisions the DEVELOPMENT environment -- mold,

@@ -24,3 +24,8 @@ type-complexity-threshold = 300
 # Allow panicking in tests (unwrap/expect) but forbid in production code
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true
+# Must equal `rust-version` in Cargo.toml. Cargo declares the floor to
+# consumers; this is what makes clippy hold us to it, by rejecting an API newer
+# than the floor even though the pinned toolchain has it. The two drifting apart
+# is silent: nothing compares them, and the MSRV CI job reads only Cargo.toml.
+msrv = "1.88"
