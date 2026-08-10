@@ -10,7 +10,7 @@ SPDX-License-Identifier: MIT OR Apache-2.0
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)
 [![Rust](https://img.shields.io/badge/rust-1.88%2B-orange.svg)](https://www.rust-lang.org)
-[![codecov](https://codecov.io/gh/elioseverojunior/glaucus/graph/badge.svg?token=WLtZC4tMKB)](https://codecov.io/gh/elioseverojunior/glaucus)
+[![codecov](https://codecov.io/gh/elioseverojunior/glaucus/graph/badge.svg?token=C1C23U0Y3G)](https://codecov.io/gh/elioseverojunior/glaucus)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/elioseverojunior/glaucus/badge)](https://securityscorecards.dev/viewer/?uri=github.com/elioseverojunior/glaucus)
 [![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](https://slsa.dev)
 
