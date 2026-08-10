@@ -344,17 +344,20 @@ jobs:
       # on. One setup, keyed on the file that actually describes it.
       - uses: ./.github/actions/setup-rust-env
 
-      # tarpaulin builds doctests with nightly (`--run-types Doctests`). Left to
-      # itself it installs one mid-run, and that install raced whatever else was
-      # touching rustup:
-      #   component download failed for cargo-x86_64-unknown-linux-gnu:
-      #   could not rename 'downloaded' file ... No such file or directory
-      # Installing it up front is one serialised rustup call, so tarpaulin finds
-      # the toolchain already present and never shells out to rustup at all.
-      # `minimal` because only rustc/cargo are needed to build a doctest.
-      - name: Install nightly for doctest instrumentation
-        run: rustup toolchain install nightly --profile minimal --no-self-update
-
+      # The nightly install that used to sit here is gone, and its absence is the
+      # fix rather than a tidy-up. It installed the FLOATING `nightly` channel,
+      # which is what tarpaulin then instrumented doctests with while unit tests
+      # used the stable pin -- two compilers feeding one profraw merge. The
+      # 2026-08-08 nightly changed the profraw format and the merge stopped
+      # parsing, turning a toolchain the project never chose into the reason CI
+      # was red.
+      #
+      # `mise run coverage` now installs and selects a DATED nightly itself, so
+      # the pin lives in mise.toml beside the tarpaulin invocation it governs --
+      # one source of truth that local runs and CI share, rather than a version
+      # named here and a command that uses it there. It keeps the serialised
+      # up-front rustup call that this step existed to provide (see mise.toml for
+      # the race it avoids).
       - name: Run tests with coverage
         env:
           RUST_COVERAGE_THRESHOLD: ${{ vars.RUST_COVERAGE_THRESHOLD || '100' }}

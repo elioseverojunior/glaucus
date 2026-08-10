@@ -1640,6 +1640,35 @@ set -Eeuo pipefail
 # opens a Tera comment in a mise run block and fails to render. A bare
 # "${args[@]}" is also an unbound-variable error under `set -u` when empty.
 eval "args=(${usage_args:-})"
+
+# ONE toolchain instruments everything, and it is PINNED. Both halves matter.
+#
+# tarpaulin builds doctests with a nightly (rustdoc's --persist-doctests is
+# nightly-only) and, when the active toolchain is not itself a nightly, it
+# resolves the floating `nightly` CHANNEL to do it -- ignoring RUSTUP_TOOLCHAIN.
+# Unit tests meanwhile compiled with the project's stable pin, so two different
+# compilers produced the profraws that tarpaulin then merged.
+#
+# That merge is only sound while both emit the same profraw format version, and
+# on 2026-08-08 a nightly LLVM bump broke it:
+#
+#   ERROR llvm_profparser: consistency check for reading counts failed
+#   ERROR cargo_tarpaulin: parser failure: Nom(Satisfy)
+#
+# Bisected: holding tarpaulin at one version and moving only the nightly flips
+# pass -> fail, and both 0.35.4 and 0.37.0 fail, so there is no release to
+# upgrade into. Naming a dated nightly HERE fixes it at the root -- tarpaulin
+# honours an already-nightly active toolchain, so tests and doctests are built
+# by one compiler and there is no cross-format merge left to break.
+#
+# Stable is still gated: `build` compiles it and the MSRV job compiles the floor.
+# To move this pin, bump the date and re-run; a floating `nightly` is what put a
+# tool release the project never chose in charge of whether CI is green.
+COVERAGE_TOOLCHAIN="${COVERAGE_TOOLCHAIN:-nightly-2026-08-03}"
+rustup toolchain install "$COVERAGE_TOOLCHAIN" \
+  --profile minimal --component llvm-tools --no-self-update
+export RUSTUP_TOOLCHAIN="$COVERAGE_TOOLCHAIN"
+
 # `--features glaucus/cli` is load-bearing, not decoration: the `cli` feature is
 # NOT in glaucus's default set, so without this tarpaulin never compiles
 # crates/glaucus/src/cli/ and the 100% gate passes while measuring zero lines of
