@@ -59,7 +59,8 @@ on:
     - cron: "0 6 * * 1"
 
 # Top-level read-all; jobs that upload results need additional write permissions.
-permissions: read-all
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
