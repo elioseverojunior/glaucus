@@ -49,7 +49,7 @@ jobs:
     # from a ref that never shipped. Dispatching from a feature branch therefore
     # skips, rather than doing something surprising.
     if: ${{ github.ref_name == github.event.repository.default_branch }}
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       contents: write
     steps:

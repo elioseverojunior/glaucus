@@ -83,7 +83,7 @@ jobs:
   # carried elsewhere described a no-op, not a policy.
   setup:
     name: Tool manifest installs
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:

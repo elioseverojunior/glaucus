@@ -39,7 +39,7 @@ jobs:
   # the very same run produced.
   tests:
     name: Tests
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       actions: write
       contents: read

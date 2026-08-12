@@ -41,7 +41,7 @@ jobs:
   tests:
     name: Tests
     needs: [version]
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       actions: write
       contents: read

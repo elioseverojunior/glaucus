@@ -63,7 +63,7 @@ env:
 jobs:
   semver:
     name: Semantic Versioning
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     # `contents: read` only. `actions: write` was rejected outright -- "the
     # nested job 'version' is requesting 'actions: write', but is only allowed
     # 'actions: none'" -- because the calling job in cicd.yml grants `contents:

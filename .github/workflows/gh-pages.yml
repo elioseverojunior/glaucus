@@ -94,7 +94,7 @@ env:
 jobs:
   build:
     name: Build site
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 15
     permissions:
       contents: read
@@ -157,7 +157,7 @@ jobs:
     # removed, so it read as a second publish path while granting none -- and it
     # was the only thing keeping the site publishing at all.
     if: ${{ needs.build.result == 'success' && inputs.publish }}
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     timeout-minutes: 10
     permissions:
       contents: write

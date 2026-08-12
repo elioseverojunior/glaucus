@@ -30,7 +30,7 @@ permissions:
 jobs:
   analyze:
     name: CodeQL Analysis
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       contents: read
       security-events: write
