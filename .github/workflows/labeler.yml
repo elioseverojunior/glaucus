@@ -35,7 +35,22 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          # Guard named for the trigger it is guarding AGAINST, not for the one
+          # it happens to allow. `pull_request_target` runs with the base
+          # repository's token and secrets even for a fork's pull request, so
+          # checking out head code here is the textbook privilege-escalation
+          # path -- anything executable in the tree would run with write access.
+          # `github.ref` is the BASE branch under this trigger, which is what
+          # makes falling through to it the safe branch.
+          #
+          # Stated as `!= 'pull_request_target'` rather than the inherited
+          # `== 'pull_request'`. Both resolve identically today, but the old
+          # form was right only by coincidence: it never names this trigger, so
+          # "correcting" it to match the one at the top of the file would flip
+          # the checkout to fork-authored code and read like a fix while doing
+          # the opposite. This spelling stays correct if a `pull_request` or
+          # `workflow_dispatch` trigger is added later.
+          ref: ${{ github.event_name != 'pull_request_target' && github.event.pull_request.head.sha || github.ref }}
 
       - name: Label PR based on file paths
         uses: actions/labeler@bf12e9b00b37c5c0ca2b87b79b2daf7891dbda13 # v7.0.0
