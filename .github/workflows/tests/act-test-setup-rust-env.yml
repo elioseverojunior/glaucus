@@ -14,7 +14,8 @@ on:
   pull_request:
     branches: [main]
 
-permissions: read-all
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,16 +33,14 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
 
 jobs:
-  # Tests and coverage are one job because they are one command: tarpaulin
-  # builds and runs the suite to instrument it, so a separate `mise run test`
-  # step compiled and ran everything twice. It also let the two disagree --
-  # tests passed in `Format, Lint, Test` while this job failed on the coverage
-  # the very same run produced.
+  # Exercises the setup-rust-env composite end to end. It used to call the action
+  # and stop, which proved only that the steps exited zero -- it could not catch
+  # the action provisioning nothing, renaming an output, or dropping a tool a
+  # downstream gate depends on. The assertions below are the point of the job.
   tests:
     name: Tests
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
-      actions: write
       contents: read
     steps:
       # Two steps, because a YAML key cannot be conditionally omitted. act
@@ -76,3 +75,112 @@ jobs:
       # comes from rust-toolchain.toml's `components`.
       - uses: ./.github/actions/setup-rust-env
         id: rust-env
+
+      # The outputs are re-pointed sources, not passthroughs, which is exactly
+      # why they need asserting: `rust-version` now reads rust-toolchain's `name`
+      # and `cache-key` its `cachekey`, where both were previously produced by
+      # shell steps this composite owned. A rename upstream turns them into empty
+      # strings, and an empty string is indistinguishable from "not set" in every
+      # consumer -- so nothing else would report it.
+      #
+      # Through `env:` rather than inline `${{ }}`: a value containing shell
+      # metacharacters must not be interpreted as script.
+      - name: Assert action outputs are populated
+        env:
+          RUST_VERSION: ${{ steps.rust-env.outputs.rust-version }}
+          CACHE_KEY: ${{ steps.rust-env.outputs.cache-key }}
+          CACHE_HIT: ${{ steps.rust-env.outputs.cache-hit }}
+        run: |
+          set -Eeuo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          printf 'rust-version = %s\ncache-key    = %s\ncache-hit    = %s\n' \
+            "${RUST_VERSION}" "${CACHE_KEY}" "${CACHE_HIT}"
+
+          [ -n "${RUST_VERSION}" ] \
+            || fail "rust-version output is empty; rust-toolchain's \`name\` output moved or vanished"
+          [ -n "${CACHE_KEY}" ] \
+            || fail "cache-key output is empty; rust-toolchain's \`cachekey\` output moved, or cache: true stopped taking effect"
+
+      # Guards the `Resolve toolchain components` step, which MERGES a caller's
+      # extra components into clippy/rustfmt/llvm-tools rather than replacing
+      # them. Get that wrong and the toolchain still installs -- the job fails
+      # later, in whichever gate reaches for the missing component, far from the
+      # cause. llvm-tools is checked through llvm-profdata because the component
+      # ships binaries rather than a rustup shim.
+      - name: Assert toolchain and components
+        run: |
+          set -Eeuo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          rustc --version || fail "rustc not on PATH"
+          cargo --version || fail "cargo not on PATH"
+          cargo clippy --version || fail "clippy missing; the components merge dropped it"
+          cargo fmt --version || fail "rustfmt missing; the components merge dropped it"
+
+          # llvm-tools lands beside rustc in the toolchain's lib dir, not on PATH.
+          sysroot="$(rustc --print sysroot)"
+          find "${sysroot}" -name 'llvm-profdata*' -print -quit | grep -q . \
+            || fail "llvm-tools missing; tarpaulin's llvm engine cannot instrument doctests without it"
+
+      # THE REGRESSION GUARD for the decision to keep `~/.cargo/bin` out of
+      # rust-toolchain's `bin` cache layer. That layer keys on the resolved
+      # versions of its own `cargo-tools` input alone; comply and ignorefile are
+      # `cargo install --git --rev` builds sharing the same directory, so their
+      # revs cannot appear in it and a rev bump would keep serving a stale
+      # binary. If someone later simplifies by delegating `bin`, these two are
+      # what breaks -- silently, because a stale binary still runs.
+      #
+      # They are not decorative: hk.pkl's `gitignore` step shells out to
+      # ignorefile and its `comply`/`comply-fix`/`comply-format` steps to comply,
+      # all of which cicd.yml's lint job reaches through `hk check --all`.
+      - name: Assert git-sourced tools are installed
+        run: |
+          set -Eeuo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          command -v comply >/dev/null 2>&1 \
+            || fail "comply not on PATH; \`hk check --all\` fails with 'comply: command not found'"
+          command -v ignorefile >/dev/null 2>&1 \
+            || fail "ignorefile not on PATH; mise run gitignore:check fails with 'ignorefile: command not found'"
+
+          comply --version || true
+          ignorefile --version || true
+
+      # cargo-binstall is the default `cargo-tools` entry and exists for mise's
+      # benefit: mise's `cargo:` backend looks for it at ~/.cargo/bin and, absent,
+      # compiles every pinned tool from source -- the ~9 minute `mise install`
+      # this whole arrangement was built to avoid. mise itself comes from
+      # mise-action and every later gate invokes it.
+      - name: Assert provisioning tools
+        run: |
+          set -Eeuo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+
+          command -v cargo-binstall >/dev/null 2>&1 \
+            || fail "cargo-binstall missing; mise falls back to compiling every pinned tool from source"
+          command -v mise >/dev/null 2>&1 \
+            || fail "mise not on PATH; mise-action did not provision"
+
+      # .cargo/config.toml pins `-fuse-ld=mold` for x86_64-unknown-linux-gnu with
+      # NO fallback, so on that target mold is a hard requirement for any cargo
+      # invocation rather than an optimisation. Without it every compiling job
+      # dies with `clang: error: invalid linker name in argument '-fuse-ld=mold'`.
+      # Guarded on the same condition the install step uses, so the assertion
+      # cannot fail on a platform that never installs it.
+      - name: Assert mold (Linux x64 only)
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        run: |
+          set -Eeuo pipefail
+          command -v mold >/dev/null 2>&1 \
+            || { echo "::error::mold missing; every cargo build on this target fails on -fuse-ld=mold"; exit 1; }
+          mold --version
+
+      # The end-to-end proof: a real compile through the linker and toolchain the
+      # steps above only inspected. `cargo metadata` would not exercise the
+      # linker, and `--all-features` is what pulls in the optional CLI surface.
+      # Skipped under act by default -- the assertions above are what local runs
+      # are for, and a cold workspace check costs minutes in a container.
+      - name: Assert the workspace actually builds
+        if: ${{ vars.ACT != 'true' }}
+        run: cargo check --workspace --all-features --locked

@@ -54,11 +54,16 @@ jobs:
       # cargo-fuzz needs nightly for the sanitizer -Z flags; the steps below run
       # `cargo +nightly`, so without the channel the project one gets installed
       # and every fuzz invocation fails on a missing toolchain.
+      # `cache-key-suffix`, formerly `rust-cache-shared-key`: the input was renamed
+      # when Swatinem/rust-cache was replaced by rust-toolchain's own caching, and
+      # `shared-key` has no counterpart there. The purpose is unchanged -- keep
+      # this job's registry/build cache namespaced away from the stable one, since
+      # a nightly toolchain resolves a different dependency set.
       - uses: ./.github/actions/setup-rust-env
         with:
           toolchain: nightly
           cargo-tools: cargo-fuzz
-          rust-cache-shared-key: nightly
+          cache-key-suffix: nightly
 
       - name: Check for fuzz targets
         id: has-fuzz

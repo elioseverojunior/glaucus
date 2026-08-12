@@ -33,32 +33,23 @@ inputs:
     required: false
     default: ""
   cargo-tools:
-    description: "Space-separated list of cargo tools to install"
+    description: >
+      Space-separated list of cargo tools to install via install-action.
+      Deliberately NOT routed through rust-toolchain's own `cargo-tools` input:
+      that would move these binaries under its `bin` cache layer, whose key is
+      derived from the resolved tool versions alone. The git-sourced tools below
+      land in the same `~/.cargo/bin` and their revs would not be in that key,
+      so a rev bump would keep serving a stale build. The dedicated cache below
+      keys on both and stays correct.
+
+      cargo-binstall is here for mise's benefit, not ours: mise's `cargo:`
+      backend shells out to ~/.cargo/bin/cargo-binstall and, finding none on a
+      runner, falls back to compiling each pinned tool from source -- which is
+      what made `mise install` take ~9 minutes.
+
+      mise.toml is otherwise the single source of truth for tool versions. A job
+      needing something outside it passes it here.
     required: false
-    # cargo-binstall is here for mise's benefit, not ours: mise's `cargo:`
-    # backend shells out to ~/.cargo/bin/cargo-binstall and, finding none on a
-    # runner, falls back to compiling each pinned tool from source -- which is
-    # what made `mise install` take ~9 minutes.
-    #
-    # `cargo-binstall` ALONE, and everything else comes from mise. The `Setup
-    # mise` step below runs a full `mise install`, which provisions every `cargo:`
-    # entry in mise.toml into `~/.local/share/mise/installs/` and puts it on PATH
-    # -- so anything listed here as well was installed twice per job, 15 jobs per
-    # run. A CI log confirms it: `mise/installs/cargo-cargo-audit/0.22.2/bin` on
-    # PATH alongside install-action's copy in `~/.cargo/bin`.
-    #
-    # binstall is the exception because mise's cargo backend looks for it at
-    # `~/.cargo/bin` and falls back to compiling from source when it is missing,
-    # which is what made `mise install` take ~9 minutes. Installing it prebuilt
-    # first is what makes every mise install after it a download.
-    #
-    # mise.toml is therefore the single source of truth for tool versions. A job
-    # needing something outside it still passes that via this input.
-    #
-    # cargo-only. gitleaks belongs to mise.toml's `[tools]` registry section, not
-    # here -- install-action has no manifest entry for it, so listing it failed
-    # the Setup job outright. Anything under `# Binaries from mise registries:`
-    # in mise.toml is mise's to install, not this action's.
     default: "cargo-binstall"
   comply-rev:
     description: >
@@ -79,35 +70,25 @@ inputs:
     required: false
     default: "0ad0e20042b173838394c58c768225255afb3955"
   cache-key-suffix:
-    description: "Additional suffix for cache key specificity"
-    required: false
-    default: ""
-  cache-target:
-    description: "Whether to cache target directory"
-    required: false
-    default: "true"
-  rust-cache-shared-key:
-    description: "Shared key for rust-cache (e.g., 'perf' for benchmarks)"
-    required: false
-    default: ""
-  rust-cache-save-if:
-    description: "Condition for rust-cache to save (e.g., github.ref == 'refs/heads/main')"
+    description: >
+      Namespaces this job's registry/build cache away from the shared one. A job
+      whose dependency set differs from the workspace default -- `nightly`, for
+      instance -- passes a suffix so it neither poisons nor is poisoned by the
+      common cache. Replaces the old `rust-cache-shared-key`, which existed only
+      to feed Swatinem's `shared-key`.
     required: false
     default: ""
 
 outputs:
   cache-hit:
     description: "Whether the Rust cache was restored (exact match)"
-    value: ${{ steps.rust-cache.outputs.cache-hit }}
+    value: ${{ steps.rust-toolchain.outputs.cache-hit }}
   cache-key:
-    description: "The computed cache key passed to Swatinem/rust-cache"
-    value: ${{ steps.cache-names.outputs.cache-key }}
-  cache-shared-key:
-    description: "The computed shared key passed to Swatinem/rust-cache"
-    value: ${{ steps.cache-names.outputs.cache-shared-key }}
+    description: "The registry/build cache key rust-toolchain derived"
+    value: ${{ steps.rust-toolchain.outputs.cachekey }}
   rust-version:
     description: "The installed Rust toolchain version (e.g. 'rustc 1.88.0 (a1b2c3d4e 2025-07-14)')"
-    value: ${{ steps.rust-version.outputs.version }}
+    value: ${{ steps.rust-toolchain.outputs.name }}
 
 runs:
   using: "composite"
@@ -172,21 +153,39 @@ runs:
         fi
         echo "list=${list}" >> "$GITHUB_OUTPUT"
 
+    # Installs the toolchain AND owns the registry/build caches. The separate
+    # `Swatinem/rust-cache` step this replaced is gone, along with the shell step
+    # that hand-derived its key and shared-key: the action restores both layers
+    # before the toolchain is used and saves them from its own `post:`.
+    #
+    # `cache-layers` deliberately omits `bin`. That layer keys on the resolved
+    # versions of the tools named in the action's own `cargo-tools` input, and
+    # the git-sourced comply/ignorefile below share `~/.cargo/bin` without
+    # appearing in it -- so a rev bump would leave the key unchanged and keep
+    # serving a stale binary. The dedicated cache further down keys on both revs
+    # and stays correct, which is why `~/.cargo/bin` remains ours to manage.
+    #
+    # Splitting the two layers is the point of delegating at all: `registry` is
+    # keyed on the dependency set alone and `build` on the dependency set plus
+    # the resolved toolchain, so a compiler bump no longer invalidates crates it
+    # never touched -- one cache key for both, which is what the old setup had.
     - name: Setup Rust toolchain
       id: rust-toolchain
-      uses: elioseverojunior/rust-toolchain@365ab4286518f5f3d13c12ed638024bdc86f413b # v0.3.0-1
+      uses: elioseverojunior/rust-toolchain@03150c718cfa2a2689f3dbb992d6b814a7e1c0b0 # v0.6.0-71
       with:
         toolchain: ${{ inputs.toolchain }}
         profile: ${{ inputs.profile }}
         components: ${{ steps.components.outputs.list }}
         targets: ${{ inputs.targets }}
+        cache: "true"
+        cache-layers: "registry,build"
+        # Required whenever `registry` or `build` is enabled; the action fails
+        # rather than silently degrading if it is missing.
+        cache-key-hash: ${{ hashFiles('**/Cargo.lock') }}
+        cache-key-suffix: ${{ inputs.cache-key-suffix }}
+        cache-on-failure: "true"
 
-    - name: Get Rust version
-      id: rust-version
-      shell: bash
-      run: echo "version=$(rustc --version)" >> "$GITHUB_OUTPUT"
-
-    - name: Compute cache key
+    - name: Compute cargo-bin cache key
       id: cache-names
       shell: bash
       # Through the environment, not `${{ }}` interpolation: the tool list is an
@@ -196,12 +195,8 @@ runs:
         CARGO_TOOLS: ${{ inputs.cargo-tools }}
         IGNOREFILE_REV: ${{ inputs.ignorefile-rev }}
         COMPLY_REV: ${{ inputs.comply-rev }}
+        TOOLCHAIN_NAME: ${{ steps.rust-toolchain.outputs.name }}
       run: |
-        cache_key="cargo-${{ runner.os }}-${{ runner.arch }}-${{ inputs.cache-key-suffix }}-${{ hashFiles('**/Cargo.lock') }}"
-        echo "cache-key=${cache_key}" >> "$GITHUB_OUTPUT"
-        shared_key="${{ inputs.rust-cache-shared-key || steps.rust-toolchain.outputs.name }}"
-        echo "cache-shared-key=${shared_key}" >> "$GITHUB_OUTPUT"
-
         # `hashFiles` reads files, and the tool list is a string, so the key for
         # the binary cache is hashed here instead. Keying on the list means
         # adding or removing a tool invalidates it and nothing else does; the
@@ -225,27 +220,8 @@ runs:
         else
           revs_hash="$(printf '%s-%s' "$IGNOREFILE_REV" "$COMPLY_REV" | shasum -a 256)"
         fi
-        bin_key="cargo-bin-${{ runner.os }}-${{ runner.arch }}-${{ steps.rust-toolchain.outputs.name }}-${tools_hash:0:16}-${revs_hash:0:16}-$(date -u +%G%V)"
+        bin_key="cargo-bin-${{ runner.os }}-${{ runner.arch }}-${TOOLCHAIN_NAME}-${tools_hash:0:16}-${revs_hash:0:16}-$(date -u +%G%V)"
         echo "cargo-bin-key=${bin_key}" >> "$GITHUB_OUTPUT"
-
-    - name: Setup Rust cache
-      id: rust-cache
-      uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-      with:
-        cache-on-failure: true
-        save-if: ${{ inputs.cache-target == 'true' && (inputs.rust-cache-save-if == '' || inputs.rust-cache-save-if) }}
-        # `~/.cargo/bin` is handled by the dedicated step below instead. On save,
-        # rust-cache's `cleanBin` deletes every file in that directory absent
-        # from `.crates.toml`/`.crates2.json`, and neither install-action nor
-        # cargo-binstall registers there -- `.crates2.json` stays empty while 39
-        # binaries sit on disk. So the tools were erased from the cache on every
-        # save, and an EXACT cache hit still reinstalled all 21 of them.
-        cache-bin: "false"
-        # The resolved channel, not the input: with `toolchain` empty the input
-        # would yield a blank shared-key, and every job would fall back to
-        # keying on its own job_id instead of sharing one cache.
-        shared-key: ${{ steps.cache-names.outputs.cache-shared-key }}
-        key: ${{ steps.cache-names.outputs.cache-key }}
 
     # Restored BEFORE the install step, so install-action finds the binaries
     # already present and resolves rather than re-downloads.
@@ -309,7 +285,7 @@ runs:
 
     - name: Install cargo tools
       if: ${{ inputs.cargo-tools != '' && steps.cargo-bin.outputs.cache-hit != 'true' }}
-      uses: taiki-e/install-action@67729d5c413db75907f0ad1e39bb04b9c868ff60 # v2.85.7
+      uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
       with:
         tool: |
           ${{ inputs.cargo-tools }}
