@@ -21,12 +21,36 @@ on:
   workflow_dispatch:
 
 # Top-level read-all; jobs that upload results need additional write permissions.
-permissions: read-all
+permissions:
+  contents: read
 
 jobs:
   analysis:
     name: Scorecard analysis
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    # HARDCODED, and the one job in this repository that must stay that way --
+    # deliberately not the `vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest'`
+    # expression every other job uses.
+    #
+    # OpenSSF verifies the workflow before accepting results, and requires the
+    # scorecard job to name exactly one Ubuntu runner STATICALLY. It cannot
+    # resolve an expression, so it rejected every upload with:
+    #
+    #   400 {"code":400,"message":"workflow verification failed: scorecard job
+    #   should have exactly 1 'Ubuntu' virtual environment"}
+    #
+    # The action retries three times and then downgrades the failure to
+    # `::warning::Unable to POST scorecard results to webapp`, so the job still
+    # reported success while nothing was ever published -- which is why the badge
+    # and https://scorecard.dev/viewer/?uri=github.com/elioseverojunior/glaucus
+    # returned 404 from the first run onward. The scan itself always worked; only
+    # the publish step failed.
+    #
+    # This forecloses self-hosted arm64 for THIS job specifically: the upstream
+    # restrictions do not permit self-hosted runners for published results at
+    # all, so it is a badge-or-self-hosted choice, not a configuration to tune.
+    # Every other job keeps the expression.
+    # https://github.com/ossf/scorecard-action#workflow-restrictions
+    runs-on: ubuntu-latest
     permissions:
       # Needed to upload the results to code-scanning dashboard.
       security-events: write
@@ -51,7 +75,6 @@ jobs:
           persist-credentials: false
 
       - name: "Run analysis"
-        # uses: ./.github/actions/scorecard-action
         uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:
           results_file: results.sarif
@@ -80,6 +103,6 @@ jobs:
           path: results.sarif
           retention-days: 5
 
-      - uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
+      - uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
         with:
           sarif_file: results.sarif
