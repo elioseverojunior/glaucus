@@ -8,14 +8,26 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, edited]
 
+# Read-only at workflow scope; every job below states its own write.
+#
+# This matters more here than in most workflows because the trigger is
+# `pull_request_target`, which runs with the BASE repository's token and has
+# access to secrets even when the pull request comes from a fork. A
+# workflow-level `pull-requests: write` hands that token to every job added
+# later, including one that might not have been written with a forked PR in
+# mind. Per-job grants keep the blast radius of a future addition to the job
+# that asked for it.
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   label-files:
     name: Label by files
     runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    # `actions/labeler` writes labels onto the PR.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,6 +46,11 @@ jobs:
   label-conventional-commits:
     name: Label by conventional commits
     runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    # Derives a `type:*` label from the PR title and applies it. No checkout, so
+    # no `contents` beyond the default read this job never uses.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Label PR based on conventional commit title
         uses: bcoe/conventional-release-labels@886f696738527c7be444262c327c89436dfb95a8 # v1.3.1
@@ -59,6 +76,13 @@ jobs:
   label-semver-bump:
     name: Label version bump (GitVersion)
     runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    # Swaps `bump:*` labels via github-script (`issues.removeLabel` /
+    # `issues.addLabels`). PR labels are served by the issues API but governed by
+    # the `pull-requests` scope, so `issues: write` is NOT required here --
+    # granting it would widen the token to real issues for no benefit.
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Determine version bump
         id: bump

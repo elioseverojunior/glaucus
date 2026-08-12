@@ -50,10 +50,16 @@ on:
   #     - ".github/workflows/performance.yml"
   workflow_dispatch:
 
+# Read-only at workflow scope. Every write this workflow needs is declared on
+# the single job that performs it, below.
+#
+# The distinction is not cosmetic even with one job: a workflow-level grant is
+# inherited by every job added later, so the second job to appear here would
+# silently receive push access to gh-pages and comment access to pull requests
+# without anyone writing that down. Declaring it per job makes the next
+# contributor state the need explicitly, which is the point of least privilege.
 permissions:
-  contents: write       # required to push the updated baseline to gh-pages
-  pull-requests: write  # required to post the comparison comment on PRs
-  deployments: write    # required by benchmark-action for environments
+  contents: read
 
 concurrency:
   group: perf-${{ github.workflow }}-${{ github.ref }}
@@ -66,7 +72,15 @@ env:
 jobs:
   benchmark:
     name: Bench vs main baseline
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    # Moved here from workflow scope. A job block REPLACES the workflow default
+    # rather than merging with it, so this must restate every scope the job
+    # needs, `contents` included -- listing only the writes would silently drop
+    # read access.
+    permissions:
+      contents: write # push the updated baseline to gh-pages
+      pull-requests: write # post the comparison comment on PRs
+      deployments: write # required by benchmark-action for environments
     timeout-minutes: 45
 
     steps:
