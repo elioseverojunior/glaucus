@@ -21,7 +21,8 @@ on:
         type: boolean
         default: false
 
-permissions: read-all
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -38,6 +39,7 @@ env:
   # tool that reads it then makes unauthenticated, rate-limited API calls.
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
   GITVERSION_SPEC: ${{ vars.GITVERSION_SPEC || '6.x' }}
+  REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
 
 jobs:
   # ──────────────────────────────────────────────
@@ -45,7 +47,7 @@ jobs:
   # ──────────────────────────────────────────────
   setup:
     name: Setup
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,7 +55,7 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ env.REF }}
 
       - name: Setup Environment
         uses: ./.github/actions/setup-rust-env
@@ -94,7 +96,7 @@ jobs:
     # in `build` -- and `tests` inherits the dependency transitively, so it does
     # not need repeating there.
     needs: [setup, version]
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -102,7 +104,7 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ env.REF }}
 
       - name: Setup Environment
         uses: ./.github/actions/setup-rust-env
@@ -113,41 +115,26 @@ jobs:
   # ──────────────────────────────────────────────
   #  4. SAST — CodeQL static analysis
   # ──────────────────────────────────────────────
+  # No `runs-on` here, and its absence is required rather than an oversight. A
+  # job that calls a reusable workflow with `uses:` may set only `name`, `uses`,
+  # `with`, `secrets`, `needs`, `if` and `permissions`; GitHub rejects the file
+  # at parse time otherwise -- `Invalid workflow file ... Unexpected value
+  # 'runs-on'` -- which takes down every job in this workflow, not just this one.
+  #
+  # No runner steering is lost. codeql.yml's own job carries the identical
+  # `vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest'` ladder, and the
+  # runner is chosen by the job that actually executes, so enabling self-hosted
+  # arm64 moves this analysis with everything else. What this forgoes is giving
+  # SAST a runner DIFFERENT from codeql.yml's other callers; that needs a
+  # `runs-on` input on the callee passed through `with:`, not a key here.
   sast:
     name: SAST
     needs: [setup, version]
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       security-events: write
       actions: read
       contents: read
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: "recursive"
-          fetch-depth: 0
-          fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
-
-      - name: Setup Environment
-        uses: ./.github/actions/setup-rust-env
-
-      # `rust`, not `javascript-typescript`. This is a Rust workspace: pointed at
-      # JS/TS, CodeQL found no source to analyse and reported clean, which is
-      # indistinguishable from a passing scan. `queries` and `category` match
-      # codeql.yml so the two produce comparable results -- that workflow keeps
-      # the full `[rust, nodejs]` matrix on its weekly schedule.
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
-        with:
-          languages: rust
-          queries: +security-and-quality
-
-      - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
-        with:
-          category: "/language:rust"
+    uses: ./.github/workflows/codeql.yml
 
   # ──────────────────────────────────────────────
   #  5.  MSRV — compile at the DECLARED minimum
@@ -164,7 +151,7 @@ jobs:
     # is one `cargo check`, and a broken floor should surface in three minutes
     # instead of behind the full test-and-build chain.
     needs: [setup, version]
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       contents: read
     steps:
@@ -174,7 +161,7 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ env.REF }}
 
       # READ the floor; never hardcode it. A literal version here would be a
       # second source of truth free to disagree with Cargo.toml -- the same class
@@ -318,10 +305,9 @@ jobs:
   # the very same run produced.
   tests:
     name: Tests
-    needs: [lint, sast]
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    needs: [setup, version, lint, sast]
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
-      actions: write
       contents: read
     steps:
       - name: Checkout
@@ -330,7 +316,7 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ env.REF }}
           token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       # llvm-tools, which tarpaulin's llvm engine needs to instrument doctests,
@@ -418,7 +404,7 @@ jobs:
       && needs.version.result == 'success'
       && needs.lint.result == 'success'
       && needs.sast.result == 'success'
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -426,7 +412,7 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ env.REF }}
 
       - name: Setup Environment
         uses: ./.github/actions/setup-rust-env
@@ -562,7 +548,7 @@ jobs:
       && needs.msrv.result == 'success'
       && github.ref_name == github.event.repository.default_branch
       && github.event_name == 'push'
-    runs-on: ${{ vars.RUNS_ON || 'ubuntu-latest' }}
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     permissions:
       contents: write
       pull-requests: write
@@ -582,7 +568,7 @@ jobs:
           submodules: "recursive"
           fetch-depth: 0
           fetch-tags: "true"
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ env.REF }}
 
       - name: Setup Environment
         uses: ./.github/actions/setup-rust-env
