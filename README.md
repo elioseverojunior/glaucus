@@ -6,6 +6,19 @@ SPDX-License-Identifier: MIT OR Apache-2.0
 
 # Glaucus
 
+<!-- Absolute raw.githubusercontent URL, not the relative `docs/images/...` path.
+     Cargo.toml sets `readme = "README.md"`, so this same file is rendered by
+     crates.io and docs.rs, and neither resolves repository-relative links -- the
+     logo would render on GitHub and appear broken on the crate page. Pinned to
+     `main` so it tracks the current artwork rather than a frozen tag.
+     Inline HTML because Markdown's image syntax cannot set a width. -->
+<p align="center">
+  <img
+    src="https://raw.githubusercontent.com/elioseverojunior/glaucus/main/docs/images/glaucus-from-greek-mythology.svg"
+    alt="Glaucus — a sea deity of Greek mythology, the project's namesake"
+    width="400">
+</p>
+
 **Safe YAML for Rust** — zero `unsafe` by default, full YAML 1.2.2 spec compliance, high performance.
 
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE-MIT)

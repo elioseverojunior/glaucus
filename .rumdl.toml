@@ -106,3 +106,18 @@ line_length = 0
 [MD004]
 # MD004 / Unordered List Style: DASH
 style = "dash"
+
+[MD033]
+# MD033 / Inline HTML: allowed for exactly two elements, not disabled outright.
+#
+# The README logo needs a width, and Markdown's `![alt](src)` syntax cannot set
+# one -- the artwork is 1048x1148, so unsized it renders as a full-width banner.
+# `<img>` is the only way to say "200px", and `<p align="center">` is the only
+# way to centre it on GitHub.
+#
+# Listed rather than turning the rule off: MD033 exists because raw HTML does
+# not survive every Markdown renderer, and crates.io sanitises it (`align` may
+# be dropped there, degrading to left-aligned -- acceptable, the image still
+# shows). Naming the two elements keeps the rule enforcing that limit for
+# everything else.
+allowed_elements = ["p", "img"]
