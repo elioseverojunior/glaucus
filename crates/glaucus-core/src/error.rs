@@ -426,7 +426,15 @@ pub struct ParserPolicies {
     pub deny_anchors: bool,
     /// Reject documents that carry explicit tags (`!tag`, `!!str`).
     pub deny_tags: bool,
-    /// Maximum byte length for any single scalar (`None` = unbounded).
+    /// Maximum byte length for any single scalar (`None` = inherit the limit).
+    ///
+    /// This can only ever *tighten*. The safe ceiling is
+    /// [`ResourceLimits::max_scalar_length`](crate::limits::ResourceLimits::max_scalar_length)
+    /// and the effective bound is the smaller of the two, so setting this above
+    /// the limit does not raise the ceiling — a hardening knob must not be usable
+    /// to weaken a default.
+    ///
+    /// `None` therefore means "no additional tightening", not "unbounded".
     pub max_scalar_length: Option<usize>,
 }
 

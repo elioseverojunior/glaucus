@@ -44,6 +44,7 @@ fuzz_target!(|data: &[u8]| {
                 // Generous: anchors are the raw material this target needs.
                 max_anchors: 4_096,
                 max_anchor_name_length: 256,
+                max_scalar_length: 8_192,
             },
             ..Default::default()
         };

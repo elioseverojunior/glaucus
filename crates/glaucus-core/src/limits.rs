@@ -29,6 +29,7 @@
 /// - **Alias amplification**: memory exhaustion → [`max_total_alias_nodes`](Self::max_total_alias_nodes)
 /// - **Anchor flood**: memory exhaustion → [`max_anchors`](Self::max_anchors)
 /// - **Huge anchor names**: memory exhaustion → [`max_anchor_name_length`](Self::max_anchor_name_length)
+/// - **Huge scalars**: memory exhaustion → [`max_scalar_length`](Self::max_scalar_length)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct ResourceLimits {
@@ -73,6 +74,17 @@ pub struct ResourceLimits {
     /// reach anchor names, which are a separate attacker-controlled string that
     /// gets owned and used as a map key.
     pub max_anchor_name_length: usize,
+    /// Maximum byte length of any single scalar. Default: 10 MiB.
+    ///
+    /// [`max_document_size`](Self::max_document_size) bounds the whole document
+    /// and leaves a single scalar inside it unbounded up to that size, which is
+    /// 256 MiB by default — far more than any legitimate individual value.
+    ///
+    /// A companion knob exists as `ParserPolicies::max_scalar_length`, and the two
+    /// are not redundant: this one is the *safe ceiling* every caller gets for
+    /// free, while the policy is opt-in *further tightening*. The effective bound
+    /// is the smaller of the two, so a policy can never raise this ceiling.
+    pub max_scalar_length: usize,
 }
 
 impl Default for ResourceLimits {
@@ -86,6 +98,7 @@ impl Default for ResourceLimits {
             max_total_alias_nodes: 100_000,
             max_anchors: 1_024,
             max_anchor_name_length: 1_024,
+            max_scalar_length: 10 * 1024 * 1024, // 10 MiB
         }
     }
 }
@@ -102,6 +115,7 @@ impl ResourceLimits {
             max_total_alias_nodes: usize::MAX,
             max_anchors: usize::MAX,
             max_anchor_name_length: usize::MAX,
+            max_scalar_length: usize::MAX,
         }
     }
 }
@@ -121,6 +135,7 @@ mod tests {
         assert_eq!(limits.max_total_alias_nodes, 100_000);
         assert_eq!(limits.max_anchors, 1_024);
         assert_eq!(limits.max_anchor_name_length, 1_024);
+        assert_eq!(limits.max_scalar_length, 10 * 1024 * 1024);
     }
 
     #[test]
@@ -131,5 +146,6 @@ mod tests {
         assert_eq!(limits.max_total_alias_nodes, usize::MAX);
         assert_eq!(limits.max_anchors, usize::MAX);
         assert_eq!(limits.max_anchor_name_length, usize::MAX);
+        assert_eq!(limits.max_scalar_length, usize::MAX);
     }
 }

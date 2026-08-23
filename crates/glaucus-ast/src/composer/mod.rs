@@ -260,9 +260,16 @@ impl<'a> Composer<'a> {
         tag: Option<(Cow<'a, str>, Cow<'a, str>)>,
     ) -> Result<Node<'a>> {
         self.count_node(span)?;
-        if let Some(max) = self.config.policies.max_scalar_length
-            && value.len() > max
-        {
+        // The effective bound is the SMALLER of the safe limit and any opt-in
+        // policy tightening. Taking the minimum is what keeps the policy a
+        // hardening knob: setting it above the limit cannot raise the ceiling.
+        let max = self
+            .config
+            .policies
+            .max_scalar_length
+            .unwrap_or(usize::MAX)
+            .min(self.config.limits.max_scalar_length);
+        if value.len() > max {
             return Err(Error::new(
                 ErrorKind::ScalarLengthLimitExceeded {
                     limit: max,
@@ -1194,6 +1201,53 @@ mod tests {
         assert!(
             results.iter().all(std::result::Result::is_ok),
             "anchor count must reset between documents: {results:?}"
+        );
+    }
+
+    #[test]
+    fn scalar_length_has_a_bounded_default() {
+        // `ResourceLimits`' contract is that defaults are safe and callers opt in
+        // to raise them. An unbounded single scalar is the one hole that was left.
+        let oversized = "x".repeat(11 * 1024 * 1024);
+        let results: Vec<_> = Composer::new(&oversized).collect();
+        assert!(
+            results.iter().any(|r| matches!(
+                r,
+                Err(e) if matches!(e.kind, ErrorKind::ScalarLengthLimitExceeded { .. })
+            )),
+            "an 11 MiB scalar must be refused under default limits"
+        );
+    }
+
+    #[test]
+    fn scalar_length_default_admits_ordinary_documents() {
+        // The default must be generous enough that no realistic document trips it.
+        let big_but_sane = "x".repeat(1024 * 1024);
+        let results: Vec<_> = Composer::new(&big_but_sane).collect();
+        assert!(
+            results.iter().all(std::result::Result::is_ok),
+            "a 1 MiB scalar is legitimate and must parse"
+        );
+    }
+
+    #[test]
+    fn scalar_length_policy_tightens_but_never_loosens() {
+        // The policy field keeps its "opt-in hardening" contract: it can only make
+        // the effective bound smaller. Setting it ABOVE the limit must not raise
+        // the ceiling, or hardening config would become a way to weaken the
+        // default -- the exact opposite of what a hardening knob is for.
+        let config = ParserConfig {
+            policies: ParserPolicies {
+                max_scalar_length: Some(usize::MAX),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let oversized = "x".repeat(11 * 1024 * 1024);
+        let results: Vec<_> = Composer::with_config(&oversized, config).collect();
+        assert!(
+            results.iter().any(std::result::Result::is_err),
+            "a policy set above the limit must not raise the ceiling"
         );
     }
 

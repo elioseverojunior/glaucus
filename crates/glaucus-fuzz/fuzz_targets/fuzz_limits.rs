@@ -21,6 +21,7 @@ fuzz_target!(|data: &[u8]| {
                 max_total_alias_nodes: 64,
                 max_anchors: 16,
                 max_anchor_name_length: 32,
+                max_scalar_length: 1_024,
             },
             ..Default::default()
         };
