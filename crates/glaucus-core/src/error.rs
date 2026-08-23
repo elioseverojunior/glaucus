@@ -613,6 +613,19 @@ mod tests {
         assert!(doc.contains("document size"));
         assert!(doc.contains("4096"));
 
+        let alias_nodes =
+            ErrorKind::AliasMaterializationLimitExceeded { limit: 100_000 }.to_string();
+        assert!(alias_nodes.contains("alias materialisation"));
+        assert!(alias_nodes.contains("100000"));
+
+        let anchors = ErrorKind::AnchorCountLimitExceeded { limit: 1_024 }.to_string();
+        assert!(anchors.contains("anchor count"));
+        assert!(anchors.contains("1024"));
+
+        let anchor_name = ErrorKind::AnchorNameLengthLimitExceeded { limit: 1_024 }.to_string();
+        assert!(anchor_name.contains("anchor name length"));
+        assert!(anchor_name.contains("1024"));
+
         let key = ErrorKind::KeyLengthLimitExceeded { limit: 256 }.to_string();
         assert!(key.contains("key length"));
         assert!(key.contains("256"));

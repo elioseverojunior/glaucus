@@ -160,8 +160,10 @@ mod tests {
 
     #[test]
     fn fix_str_schema_parse_error_is_no_op() {
-        // An empty string is unparseable as a YAML document → from_str_node returns Err.
-        let (fixed, report) = fix_str("a: 1\n", "");
+        // An unterminated flow sequence is unparseable → from_str_node returns Err.
+        // This was an empty string until empty input became a valid null document,
+        // at which point "" stopped exercising this branch at all.
+        let (fixed, report) = fix_str("a: 1\n", "[");
         assert_eq!(fixed, "a: 1\n");
         assert!(
             report.contains("schema parse error")

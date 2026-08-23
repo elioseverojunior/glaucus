@@ -108,6 +108,35 @@ mod tests {
     use super::decode;
 
     #[test]
+    fn table_maps_the_alphabet_and_sentinels() {
+        // `DECODE` is a `static` initialised by a `const fn`, so the builder runs
+        // at COMPILE time and no runtime instrumentation ever observes it. Calling
+        // it here executes the same code at runtime, which both covers it and
+        // checks the table it produces rather than trusting the loops by eye.
+        let table = super::build_table();
+
+        for (i, c) in (b'A'..=b'Z').enumerate() {
+            assert_eq!(table[c as usize], u8::try_from(i).unwrap(), "{}", c as char);
+        }
+        for (i, c) in (b'a'..=b'z').enumerate() {
+            assert_eq!(table[c as usize], 26 + u8::try_from(i).unwrap());
+        }
+        for (i, c) in (b'0'..=b'9').enumerate() {
+            assert_eq!(table[c as usize], 52 + u8::try_from(i).unwrap());
+        }
+        assert_eq!(table[b'+' as usize], 62);
+        assert_eq!(table[b'/' as usize], 63);
+        assert_eq!(table[b'=' as usize], super::PAD);
+        for ws in *b" \t\n\r" {
+            assert_eq!(table[ws as usize], super::SKIP);
+        }
+        // Everything outside the alphabet must be rejected, not silently mapped.
+        for c in [b'*', b'@', b'-', b'_', 0u8, 0x7F, 0xFF] {
+            assert_eq!(table[c as usize], super::INVALID, "byte {c:#04x}");
+        }
+    }
+
+    #[test]
     fn decodes_the_canonical_example() {
         assert_eq!(decode("SGVsbG8gV29ybGQh").unwrap(), b"Hello World!");
     }

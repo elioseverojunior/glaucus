@@ -1107,6 +1107,57 @@ mod tests {
         assert!(from_str::<TagAny>("!!int \"abc\"").is_err());
         assert!(from_str::<TagAny>("!!float \"xyz\"").is_err());
         assert!(from_str::<TagAny>("!!bool \"maybe\"").is_err());
+        assert!(from_str::<TagAny>("!!null \"nope\"").is_err());
+    }
+
+    #[test]
+    fn non_core_schema_tags_fall_through_to_implicit_resolution() {
+        // Only the six core-schema tags drive resolution. A `tag:yaml.org,2002:`
+        // tag outside that set -- and any application tag -- must keep flowing
+        // through normal resolution rather than being reinterpreted.
+        assert_eq!(
+            from_str::<TagAny>("!!timestamp 2024-01-01").unwrap(),
+            TagAny::Text("2024-01-01".into())
+        );
+        assert_eq!(
+            from_str::<TagAny>("!!seq 5").unwrap(),
+            TagAny::Int(5),
+            "an unrecognised core-schema tag must not suppress implicit resolution"
+        );
+    }
+
+    #[test]
+    fn tag_int_above_i64_max_uses_the_unsigned_visitor() {
+        // `parse_unsigned` succeeds but the value does not fit `i64`, so the
+        // deserialiser must widen rather than overflow or fall through.
+        #[derive(Deserialize, PartialEq, Debug)]
+        #[serde(untagged)]
+        enum BigInt {
+            U(u64),
+            Text(String),
+        }
+
+        assert_eq!(
+            from_str::<BigInt>("!!int 18446744073709551615").unwrap(),
+            BigInt::U(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn tag_int_accepts_negative_values() {
+        // `parse_unsigned` refuses a leading `-`, so this exercises the signed
+        // fallback rather than the unsigned fast path above.
+        assert_eq!(
+            from_str::<TagAny>("!!int \"-42\"").unwrap(),
+            TagAny::Int(-42)
+        );
+    }
+
+    #[test]
+    fn deserialize_bytes_on_a_non_scalar_is_an_error() {
+        // `core_tag` has to answer for collections too, and a sequence carries no
+        // scalar to decode.
+        assert!(from_str::<TagBytes>("[1, 2]").is_err());
     }
 
     #[test]
