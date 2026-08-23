@@ -89,16 +89,25 @@ fn content_error(text: impl Into<String>) -> Value {
     json!({ "content": [ { "type": "text", "text": text.into() } ], "isError": true })
 }
 
+/// Renders a parse error as `line:col message`, omitting the prefix when the
+/// error carries no span.
+///
+/// Extracted so the spanless branch stays reachable from a test. No
+/// `from_str_node` input produces a spanless error any more -- empty input used
+/// to, and now composes to a null document -- but `Error::spanless` is a public
+/// constructor, so the fallback is still a real case rather than dead code.
+fn format_parse_error(e: &crate::error::Error) -> String {
+    let loc = e.span.as_ref().map_or_else(String::new, |s| {
+        format!("{}:{} ", s.start.line, s.start.column)
+    });
+    format!("{loc}{e}")
+}
+
 fn tool_parse(args: &Value) -> Value {
     let text = args["text"].as_str().unwrap_or("");
     match crate::from_str_node(text) {
         Ok(_) => content_ok("valid"),
-        Err(e) => {
-            let loc = e.span.map_or_else(String::new, |s| {
-                format!("{}:{} ", s.start.line, s.start.column)
-            });
-            content_error(format!("{loc}{e}"))
-        }
+        Err(e) => content_error(format_parse_error(&e)),
     }
 }
 
@@ -188,15 +197,25 @@ mod tests {
     }
 
     #[test]
-    fn parse_invalid_without_a_span_omits_the_location_prefix() {
-        // Empty input is `UnexpectedEof`, built via `Error::spanless` (see
-        // `glaucus::from_str_node`) — the one parse-error path with no span,
-        // exercising the `e.span.map_or_else` fallback (no "line:col " prefix)
-        // that `parse_invalid_is_error_with_location` does not reach.
-        let r = call("yaml_parse", &json!({ "text": "" }));
-        assert_eq!(r["isError"], json!(true));
-        let text = r["content"][0]["text"].as_str().unwrap();
-        assert!(!text.contains(':'), "unexpected location prefix:\n{text}");
+    fn parse_error_without_a_span_omits_the_location_prefix() {
+        // Tests the formatter directly. This used to go through `yaml_parse` on
+        // empty input, which was the one parse path yielding a spanless error;
+        // empty input now composes to a null document, so no parse reaches this
+        // branch. `Error::spanless` remains public, so the fallback is still a
+        // real case and keeps its test -- just not via a parse that cannot
+        // produce it.
+        let e = crate::error::Error::spanless(crate::error::ErrorKind::UnexpectedEof);
+        let text = format_parse_error(&e);
+        assert!(!text.contains(':'), "unexpected location prefix: {text}");
+    }
+
+    #[test]
+    fn parse_of_empty_input_is_valid() {
+        // An empty or comment-only document is a null document, not an error.
+        for text in ["", "# just a comment\n"] {
+            let r = call("yaml_parse", &json!({ "text": text }));
+            assert_ne!(r["isError"], json!(true), "{text:?} should parse as valid");
+        }
     }
 
     #[test]

@@ -449,9 +449,7 @@ pub fn to_writer_with<T: serde::Serialize, W: std::io::Write>(
 /// ```
 #[cfg(feature = "ast")]
 pub fn from_str_node(input: &str) -> error::Result<Node<'_>> {
-    composer::Composer::new(input)
-        .next()
-        .unwrap_or_else(|| Err(error::Error::spanless(error::ErrorKind::UnexpectedEof)))
+    composer::compose_one(input)
 }
 
 /// Parses all YAML documents from a string.
@@ -795,8 +793,13 @@ mod tests {
 
     #[cfg(feature = "ast")]
     #[test]
-    fn node_from_str_empty_returns_error() {
-        assert!(from_str_node("").is_err());
+    fn node_from_str_empty_returns_null_document() {
+        // Was `is_err()`. An empty or comment-only document is a normal state and
+        // the ecosystem answer is null, not a hard error.
+        for input in ["", "   \n\t \n", "# comment only\n"] {
+            let node = from_str_node(input).expect("empty input should compose to null");
+            assert_eq!(node.as_str(), Some(""), "{input:?} should be null");
+        }
     }
 
     #[cfg(feature = "ast")]
@@ -833,9 +836,10 @@ mod tests {
 
     #[cfg(feature = "ast")]
     #[test]
-    fn node_from_reader_empty_returns_error() {
+    fn node_from_reader_empty_returns_null_document() {
         let reader = std::io::Cursor::new(b"");
-        assert!(from_reader_node(reader).is_err());
+        let node = from_reader_node(reader).expect("empty reader should compose to null");
+        assert_eq!(node.as_str(), Some(""));
     }
 
     #[cfg(feature = "ast")]

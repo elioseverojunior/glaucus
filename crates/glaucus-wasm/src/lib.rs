@@ -144,7 +144,10 @@ mod tests {
 
     #[test]
     fn validate_schema_parse_error_is_err() {
-        assert!(validate_logic("a: 1\n", "").is_err());
+        // An unterminated flow sequence is unparseable. This was an empty string
+        // until empty input became a valid null document, at which point "" was
+        // no longer a parse error at all.
+        assert!(validate_logic("a: 1\n", "[").is_err());
     }
 
     #[test]

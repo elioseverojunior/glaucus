@@ -775,13 +775,9 @@ impl<'de> de::VariantAccess<'de> for VariantAccess<'_> {
 /// This avoids the per-scalar overhead of `deserialize_any` → `visit_str` /
 /// `visit_i64` etc. when the caller simply needs a generic value tree.
 fn from_str_value_direct(input: &str) -> crate::error::Result<crate::value::Value> {
-    let node = glaucus_ast::composer::Composer::new(input)
-        .next()
-        .ok_or_else(|| {
-            Error::core(glaucus_core::error::Error::spanless(
-                glaucus_core::error::ErrorKind::UnexpectedEof,
-            ))
-        })??;
+    // An empty stream is a null document, not an error -- see
+    // `glaucus_ast::composer::compose_one`.
+    let node = glaucus_ast::composer::compose_one(input)?;
     Ok(crate::value::Value::new(node.into_owned()))
 }
 
@@ -817,13 +813,9 @@ pub fn from_str<T: DeserializeOwned + 'static>(input: &str) -> crate::error::Res
             .expect("TypeId of T equals TypeId of Value, downcast is infallible"));
     }
 
-    let node = glaucus_ast::composer::Composer::new(input)
-        .next()
-        .ok_or_else(|| {
-            Error::core(glaucus_core::error::Error::spanless(
-                glaucus_core::error::ErrorKind::UnexpectedEof,
-            ))
-        })??;
+    // An empty stream is a null document, not an error -- see
+    // `glaucus_ast::composer::compose_one`.
+    let node = glaucus_ast::composer::compose_one(input)?;
     let mut de = Deserializer::from_node(&node);
     T::deserialize(&mut de)
 }
@@ -871,13 +863,7 @@ pub fn from_str_with<T: DeserializeOwned + 'static>(
 ) -> crate::error::Result<T> {
     // Fast path for Value: same as from_str but with config-driven parsing.
     if std::any::TypeId::of::<T>() == std::any::TypeId::of::<crate::value::Value>() {
-        let node = glaucus_ast::composer::Composer::with_config(input, config)
-            .next()
-            .ok_or_else(|| {
-                Error::core(glaucus_core::error::Error::spanless(
-                    glaucus_core::error::ErrorKind::UnexpectedEof,
-                ))
-            })??;
+        let node = glaucus_ast::composer::compose_one_with(input, config)?;
         let value = crate::value::Value::new(node.into_owned());
         let boxed: Box<dyn std::any::Any> = Box::new(value);
         return Ok(*boxed
@@ -886,13 +872,7 @@ pub fn from_str_with<T: DeserializeOwned + 'static>(
     }
 
     let yaml_1_1 = config.yaml_1_1;
-    let node = glaucus_ast::composer::Composer::with_config(input, config)
-        .next()
-        .ok_or_else(|| {
-            Error::core(glaucus_core::error::Error::spanless(
-                glaucus_core::error::ErrorKind::UnexpectedEof,
-            ))
-        })??;
+    let node = glaucus_ast::composer::compose_one_with(input, config)?;
     let mut de = Deserializer::from_node_with(&node, yaml_1_1);
     T::deserialize(&mut de)
 }
@@ -2145,20 +2125,23 @@ mod tests {
     }
 
     #[test]
-    fn from_str_value_direct_empty_input_errors() {
-        // Empty input yields no document — the EOF arm of the Value fast path.
-        let r = from_str::<crate::value::Value>("");
-        assert!(r.is_err(), "empty input must be an EOF error");
+    fn from_str_value_direct_empty_input_is_null() {
+        // Was an EOF error. Empty input is a null document, and the `Value` fast
+        // path must agree with the ordinary path rather than keeping its own
+        // answer for the same input.
+        let v = from_str::<crate::value::Value>("").unwrap();
+        assert_eq!(v.as_node().as_str(), Some(""), "empty input should be null");
     }
 
     #[test]
-    fn from_str_with_value_fast_path_and_empty_eof() {
+    fn from_str_with_value_fast_path_handles_empty_input() {
         let cfg = glaucus_core::error::ParserConfig::default();
         // Non-empty: exercises the Value fast path in from_str_with.
         let v = from_str_with::<crate::value::Value>("a: 1", cfg.clone()).unwrap();
         assert!(matches!(v.as_node(), Node::Mapping(_)));
-        // Empty: exercises the EOF arm of from_str_with's Value fast path.
-        assert!(from_str_with::<crate::value::Value>("", cfg).is_err());
+        // Empty: a null document, matching from_str and the node API.
+        let empty = from_str_with::<crate::value::Value>("", cfg).unwrap();
+        assert_eq!(empty.as_node().as_str(), Some(""));
     }
 
     #[test]

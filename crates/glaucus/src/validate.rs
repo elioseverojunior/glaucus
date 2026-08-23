@@ -140,8 +140,10 @@ mod tests {
 
     #[test]
     fn validate_str_schema_parse_error_is_one_diagnostic() {
-        // An empty schema string is unparseable → the schema parse-error arm.
-        let diags = validate_str("a: 1\n", "");
+        // An unterminated flow sequence is unparseable → the schema parse-error
+        // arm. This was an empty string until empty input became a valid null
+        // document, at which point "" stopped being a parse error at all.
+        let diags = validate_str("a: 1\n", "[");
         assert_eq!(diags.len(), 1);
         assert_eq!(diags[0].path, "<schema>");
         assert!(diags[0].message.contains("schema parse error"));

@@ -651,3 +651,57 @@ fn nested_apply_defaults_via_facade() {
         "server:\n  host: h  # keep\n  port: 8080\n"
     );
 }
+
+// ─── Empty and comment-only documents (#30) ─────────────────────────
+
+#[test]
+fn empty_input_yields_a_null_document() {
+    // A `.yaml` with everything commented out is a normal state -- a scaffolded
+    // file, a disabled override -- and `rust-yaml`, `serde_yaml` and PyYAML all
+    // return null for it. Erroring makes routine configuration a hard failure.
+    for input in ["", "   \n\t \n", "# comment only\n", "\n\n"] {
+        let node = glaucus::from_str_node(input)
+            .unwrap_or_else(|e| panic!("{input:?} should parse as null, got: {e}"));
+        assert_eq!(
+            node.as_str(),
+            Some(""),
+            "{input:?} should compose to the null scalar"
+        );
+
+        let opt: Option<String> = glaucus::from_str(input)
+            .unwrap_or_else(|e| panic!("{input:?} should deserialise as None, got: {e}"));
+        assert!(opt.is_none(), "{input:?} should deserialise as None");
+    }
+}
+
+#[test]
+fn bare_document_marker_is_null() {
+    let node = glaucus::from_str_node("---\n").unwrap();
+    assert_eq!(node.as_str(), Some(""));
+    let opt: Option<String> = glaucus::from_str("---\n").unwrap();
+    assert!(opt.is_none());
+}
+
+#[test]
+fn multi_document_entry_points_still_yield_zero_documents() {
+    // A stream may legitimately contain zero documents. That is the honest answer
+    // for a stream, is spec-defensible, and must NOT change with the above.
+    for input in ["", "   \n", "# comment only\n"] {
+        let docs = glaucus::from_str_multi_node(input).unwrap();
+        assert!(docs.is_empty(), "{input:?} should yield 0 documents");
+    }
+}
+
+#[test]
+fn non_empty_documents_are_unaffected() {
+    assert_eq!(
+        glaucus::from_str_node("a: 1")
+            .unwrap()
+            .as_mapping()
+            .unwrap()
+            .len(),
+        1
+    );
+    let s: String = glaucus::from_str("hello").unwrap();
+    assert_eq!(s, "hello");
+}

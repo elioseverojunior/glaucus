@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use glaucus_core::error::{Error, ErrorKind, ParserConfig, Result, Strictness};
 use glaucus_core::parser::Parser;
 use glaucus_core::parser::event::{Event, EventKind};
-use glaucus_core::types::{CollectionStyle, ScalarStyle, Span, Tag};
+use glaucus_core::types::{CollectionStyle, Position, ScalarStyle, Span, Tag};
 
 use crate::node::{Mapping, Node, Scalar, Sequence};
 
@@ -43,6 +43,49 @@ const DUP_LINEAR_THRESHOLD: usize = 16;
 /// YAML, an unresolved alias, or a limit from the composer's configuration.
 pub fn compose_all(input: &str) -> Result<Vec<Node<'_>>> {
     Composer::new(input).collect()
+}
+
+/// The node an empty stream composes to: an explicit null document.
+///
+/// A plain empty scalar IS null under YAML's core schema resolution, so this is
+/// the same node `---\n` already produces for a document with no content.
+#[must_use]
+pub const fn null_node<'a>() -> Node<'a> {
+    Node::Scalar(Scalar {
+        value: Cow::Borrowed(""),
+        tag: None,
+        style: ScalarStyle::Plain,
+        span: Span::point(Position::start()),
+    })
+}
+
+/// Composes the FIRST document, treating an empty stream as a null document.
+///
+/// This is the single-document contract, and it differs from [`compose_all`] on
+/// purpose. A *stream* may legitimately contain zero documents, so `compose_all`
+/// returning an empty `Vec` is the honest answer there. A caller asking for *the*
+/// document is asking a different question, and the ecosystem answer for empty
+/// input — `rust-yaml`, `serde_yaml`, `PyYAML` — is null rather than an error. A
+/// `.yaml` file with everything commented out is a normal state, not a failure.
+///
+/// # Errors
+///
+/// Returns a scan, parse or composition error for the document being read.
+pub fn compose_one(input: &str) -> Result<Node<'_>> {
+    Composer::new(input)
+        .next()
+        .unwrap_or_else(|| Ok(null_node()))
+}
+
+/// [`compose_one`] with a caller-supplied parser configuration.
+///
+/// # Errors
+///
+/// Returns a scan, parse or composition error for the document being read.
+pub fn compose_one_with(input: &str, config: ParserConfig) -> Result<Node<'_>> {
+    Composer::with_config(input, config)
+        .next()
+        .unwrap_or_else(|| Ok(null_node()))
 }
 
 /// Returns `true` if `node` is the plain merge key scalar `<<`.
