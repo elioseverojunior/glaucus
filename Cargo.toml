@@ -160,48 +160,20 @@ wasm-bindgen = { version = ">=0.2,<1" }
 # per package and has no workspace-level form, and `package.metadata` is not an
 # inheritable field. Each published crate therefore carries its own block.
 
-# --- Performance
-# https://nnethercote.github.io/perf-book/title-page.html
-[profile.dev]
-panic = "abort"
-
-# Optimize DEPENDENCY crates even in debug builds. Deps compile once and are
-# cached, so this barely touches the edit→compile loop on our own crates, but it
-# makes debug `cargo run` / `cargo test` execute close to release speed — useful
-# when exercising the parser over real YAML fixtures locally. (Our own crates
-# stay at opt-level 0 for fast incremental rebuilds.)
-[profile.dev.package."*"]
-opt-level = 3
-
-[profile.release]
-# MAX RUNTIME SPEED. The previous `opt-level = "z"` optimized for *binary size*,
-# which is the opposite of fast (it suppresses inlining/vectorization). `3` is the
-# fastest codegen and the right default for a parser's hot path.
-opt-level = 3
-# Whole-program, cross-crate inlining: the slowest link, the fastest code. Worth
-# it here because the satellite crates (cli/lsp/mcp) inline straight into `glaucus`.
-lto = "fat"
-# One codegen unit ⇒ the optimizer sees the whole crate at once (no per-unit
-# boundaries to block inlining). Slowest compile, best code.
-codegen-units = 1
-# Drop unwinding tables / landing pads from OUR binaries. (Irrelevant to the
-# published library — a consumer's own profile decides its panic strategy.)
-panic = "abort"
-# Smaller artifacts at zero runtime cost. No debug info is kept here; profile via
-# the `profiling` profile below instead.
-strip = "symbols"
-
-# WASM is downloaded before it runs, so its *size* IS its performance. Keep
-# glaucus-wasm tuned for a small `.wasm` rather than inheriting the native
-# `opt-level = 3` above (which would bloat the module). `"s"` balances size/speed;
-# switch to `"z"` for the smallest possible module.
-[profile.release.package.glaucus-wasm]
-opt-level = "s"
-
-# Release-grade codegen but WITH line-table symbols and no stripping, so
-# `cargo flamegraph` / `perf` can attribute samples back to source. The `flame`
-# mise task builds with this profile (`--profile profiling`).
-[profile.profiling]
-debug = "line-tables-only"
-inherits = "release"
-strip = false
+# --- Build profiles: deliberately NOT here ----------------------------------
+#
+# Every `[profile.*]` lives in `.cargo/config.toml`, which is the single source
+# of truth for how this workspace builds. `mise run profile:check` fails the
+# build if one reappears in this manifest.
+#
+# That gate exists because Cargo resolves a conflict between the two in favour of
+# `.cargo/config.toml` SILENTLY -- no error, no warning. A `[profile.release]`
+# added here would simply never reach rustc. That is not hypothetical: it is how
+# the release build shipped at `opt-level = "z"` for months while this file said
+# `3` and carried a comment explaining why size optimisation had been abandoned
+# (issue #8). A declaration that cannot take effect is worse than no declaration,
+# because it reads as the truth.
+#
+# Profiles do not reach a downstream consumer from either location -- a crate
+# depending on glaucus is governed by its own profiles -- so nothing is lost by
+# keeping them out of the published manifest.

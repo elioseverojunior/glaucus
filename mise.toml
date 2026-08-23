@@ -1144,6 +1144,66 @@ fi
 '''
 shell = "bash -c"
 
+[tasks."profile:check"]
+alias = []
+description = "Fail if any Cargo.toml declares a [profile.*] block (profiles live in .cargo/config.toml)"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# `.cargo/config.toml` is the single source of truth for build profiles. This
+# gate is what makes that true rather than merely intended.
+#
+# Cargo resolves a conflict between a manifest profile and a config profile in
+# favour of the CONFIG, and it does so SILENTLY -- no error, no warning, no
+# diagnostic of any kind. A `[profile.release]` added to Cargo.toml simply never
+# reaches rustc. That is not hypothetical: the release build shipped at
+# `opt-level = "z"` while Cargo.toml said `3` and carried a comment explaining
+# why size optimisation had been abandoned (issue #8). The declaration read as
+# the truth and was inert, which is worse than saying nothing.
+#
+# A profile in a NON-root manifest is equally useless -- cargo ignores those with
+# a warning nothing here escalates -- so every manifest is checked, not just the
+# workspace root.
+#
+# Judges the INDEX, not the working tree, for the same reason `cargo:lock:check`
+# does: what gets committed is what is staged, and a partially staged manifest
+# could otherwise pass on the strength of an unstaged fix.
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "profile:check: not a git repository, nothing staged to judge." >&2
+    exit 0
+fi
+
+staged="$(mktemp -d)"
+trap 'rm -rf "${staged}"' EXIT
+git checkout-index --all --prefix="${staged}/"
+
+found=0
+while IFS= read -r manifest; do
+    # Anchored: a commented-out or nested mention is not a declaration.
+    if hits="$(grep -nE '^\[profile(\.|\])' "${manifest}" 2>/dev/null)"; then
+        echo "profile:check: ${manifest#"${staged}"/} declares a build profile:" >&2
+        printf '%s\n' "${hits}" | sed 's/^/    /' >&2
+        found=1
+    fi
+done < <(find "${staged}" -name Cargo.toml -not -path '*/target/*' | sort)
+
+if [ "${found}" -ne 0 ]; then
+    cat >&2 <<'MSG'
+
+Build profiles belong in .cargo/config.toml, which silently outranks the
+manifest -- a profile left here would never reach rustc. Move the block there,
+or delete it if .cargo/config.toml already covers it.
+MSG
+    exit 1
+fi
+'''
+shell = "bash -c"
+usage = '''
+flag "-v --verbose" help="Print each manifest as it is checked"
+'''
+
 [tasks."cargo:lock:check"]
 alias = []
 description = "Fail if Cargo.lock is out of date relative to Cargo.toml (run `cargo update` to refresh)"
@@ -2862,6 +2922,7 @@ run = [
   "mise run taplo:check",
   "mise run version:check",
   "mise run cargo:lock:check",
+  "mise run profile:check",
   "mise run cargo:clippy",
   "mise run coverage",
 ]
@@ -2925,6 +2986,7 @@ run = [
   "mise run comply:format:check",
   "mise run version:check",
   "mise run cargo:lock:check",
+  "mise run profile:check",
   "mise run cargo:clippy",
   "mise run coverage",
 ]

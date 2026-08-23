@@ -43,37 +43,80 @@ CC_aarch64_unknown_linux_gnu = "aarch64-linux-gnu-gcc"
 # Ensures host build-dependencies use your local host compiler
 HOST_CC = "gcc"
 
+# ─── Build profiles: THE single source of truth ──────────────────────────────
+#
+# Every profile lives here and NOWHERE else. `Cargo.toml` deliberately declares
+# no `[profile.*]` at all, and `mise run profile:check` enforces that.
+#
+# The enforcement is the point, not tidiness. Cargo resolves a conflict between
+# the two in favour of THIS file, silently -- no error, no warning. A
+# `[profile.release]` added to the manifest would simply never reach rustc, which
+# is exactly how the release build shipped at `opt-level = "z"` while the manifest
+# said `3` and carried a comment explaining why size optimisation had been
+# abandoned. See issue #8.
+#
+# Note these apply only to builds INSIDE this repository. A downstream crate
+# depending on glaucus is governed by its own profiles; nothing here reaches it.
+
 [profile.dev]
 debug = true
 incremental = true
+# Our own crates, kept low for a fast edit->compile loop.
 opt-level = 1
+panic = "abort"
+
+# Optimize DEPENDENCY crates even in debug builds. Deps compile once and are
+# cached, so this barely touches the edit->compile loop on our own crates, but it
+# makes debug `cargo run` / `cargo test` execute close to release speed -- useful
+# when exercising the parser over real YAML fixtures locally.
+[profile.dev.package."*"]
+opt-level = 3
 
 # `opt-level = 0` for tests specifically, overriding the `1` that `test` would
 # otherwise inherit from `dev`. This exists for the coverage gate, not for speed.
 #
 # At `opt-level = 1` LLVM merges basic blocks that consist of a single trivial
-# expression, and it makes that decision per backend. `Format::resolve` in
-# `comply-cli/src/output.rs` is four arms each returning a unit variant: every
-# arm is unit-tested, yet tarpaulin reported lines 60, 64 and 66 unexecuted on
-# `x86_64-unknown-linux-gnu` while all four measured as covered on
-# `x86_64-apple-darwin` -- 99.87% in CI against 100.00% locally. Unoptimised, the
-# arms stay distinct blocks and attribution matches the source on both.
-#
-# The comment on `resolve` records an earlier round of the same problem: dropping
-# `const fn` stopped the compiler folding the tests' calls away, but left the
-# block merging that this setting addresses. Tests build slower; a gate whose
-# verdict depends on the host does not tell you anything.
+# expression, and it makes that decision per backend -- so a function whose arms
+# are all unit-tested can still report lines unexecuted on one target and covered
+# on another. Unoptimised, the arms stay distinct blocks and attribution matches
+# the source everywhere. Tests build slower; a gate whose verdict depends on the
+# host does not tell you anything.
 [profile.test]
 opt-level = 0
 
 [profile.release]
-codegen-units = 1
-debug = false
+# MAX RUNTIME SPEED. `opt-level = "z"` optimizes for *binary size*, which is the
+# opposite of fast -- it suppresses inlining and vectorization. `3` is the fastest
+# codegen and the right default for a parser's hot path.
+opt-level = 3
+# Whole-program, cross-crate inlining: the slowest link, the fastest code. Worth
+# it here because the satellite crates inline straight into `glaucus`.
 lto = "fat"
-# "z" optimizes for binary size; use "3" for max speed instead.
-opt-level = "z"
-panic = "abort" # Optional: removes unwinding logic, saving even more space
-strip = true # Changed to true (removes all unnecessary debug symbols)
+# One codegen unit => the optimizer sees the whole crate at once (no per-unit
+# boundaries to block inlining). Slowest compile, best code.
+codegen-units = 1
+# Drop unwinding tables / landing pads from OUR binaries. (Irrelevant to the
+# published library -- a consumer's own profile decides its panic strategy.)
+panic = "abort"
+# Smaller artifacts at zero runtime cost. No debug info is kept here; profile via
+# the `profiling` profile below instead.
+debug = false
+strip = "symbols"
+
+# WASM is downloaded before it runs, so its *size* IS its performance. Keep
+# glaucus-wasm tuned for a small `.wasm` rather than inheriting the native
+# `opt-level = 3` above (which would bloat the module). `"s"` balances size/speed;
+# switch to `"z"` for the smallest possible module.
+[profile.release.package.glaucus-wasm]
+opt-level = "s"
+
+# Release-grade codegen but WITH line-table symbols and no stripping, so
+# `cargo flamegraph` / `perf` can attribute samples back to source. The `flame`
+# mise task builds with this profile (`--profile profiling`).
+[profile.profiling]
+debug = "line-tables-only"
+inherits = "release"
+strip = false
 
 # Target-specific linker improvements.
 # macOS ARM (Apple Silicon) — use the system ld64
