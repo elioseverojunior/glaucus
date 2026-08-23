@@ -105,7 +105,6 @@ scorecard = { version = "latest" }
 taplo = { version = "latest" }
 
 [hooks]
-enter = { task = "setup" }
 postinstall = '''
 echo "Installed: $MISE_INSTALLED_TOOLS"
 '''

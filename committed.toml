@@ -6,15 +6,6 @@
 # Regenerate with `mise run commit-config`; `mise run commit-config:check` guards drift.
 #
 # committed ~ https://github.com/crate-ci/committed
-style = "conventional"
-subject_length = 50
-subject_capitalized = false
-subject_not_punctuated = true
-imperative_subject = true
-line_length = 72
-no_wip = true
-no_fixup = true
-merge_commit = true
 allowed_types = [
   "feat",
   "fix",
@@ -29,3 +20,12 @@ allowed_types = [
   "init",
   "revert",
 ]
+imperative_subject = true
+line_length = 72
+merge_commit = true
+no_fixup = true
+no_wip = true
+style = "conventional"
+subject_capitalized = false
+subject_length = 50
+subject_not_punctuated = true
