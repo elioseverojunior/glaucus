@@ -1482,7 +1482,46 @@ shell = "bash -c"
 [tasks."cargo:audit"]
 alias = []
 description = "Audit dependencies for known security advisories (RustSec) with cargo-audit (reads .cargo/audit.toml)"
-run = "cargo audit"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# cargo-audit and cargo-deny both clone the RustSec advisory database, and by
+# default both clone it into the SAME directory, `$CARGO_HOME/advisory-db`.
+# cargo-audit refuses to clone into a directory that exists but is not a valid
+# checkout:
+#
+#     error: couldn't fetch advisory database: git operation failed
+#       -> Refusing to initialize the non-empty directory as '.../advisory-db'
+#
+# Two things produce that state, and neither is under this task's control:
+#
+#   * hk runs the `audit` and `deny` steps CONCURRENTLY -- there is no ordering
+#     between them -- so whichever loses the race meets a half-written directory.
+#     docs/supply-chain.md documents that audit "intentionally runs before" deny,
+#     but nothing enforced it, which is why this failed intermittently rather
+#     than always.
+#   * a CI cache can restore the directory's contents without its `.git`.
+#
+# Giving cargo-audit its own database directory removes the shared state rather
+# than trying to sequence access to it: cargo-deny keeps `advisory-db` to itself
+# and the two can no longer collide, in any order, concurrent or not.
+db="${CARGO_HOME:-${HOME}/.cargo}/advisory-db-audit"
+
+# Belt and braces for the cache-restore case: a directory that is not a valid
+# clone is unusable to cargo-audit, and re-cloning is cheap next to a failed run.
+if [ -d "${db}" ] && ! git -C "${db}" rev-parse --git-dir >/dev/null 2>&1; then
+    echo "cargo:audit: ${db} is not a valid clone; removing it before fetch." >&2
+    rm -rf "${db}"
+fi
+
+cargo audit --db "${db}" ${args[@]+"${args[@]}"}
+'''
+shell = "bash -c"
+usage = '''
+arg "[args]" var=#true help="Extra arguments forwarded to cargo-audit"
+'''
 
 [tasks."cargo:deny"]
 alias = []
