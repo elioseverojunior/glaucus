@@ -35,7 +35,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-glaucus = "0.2"
+glaucus = "0.3"
 serde = { version = "1", features = ["derive"] }
 ```
 

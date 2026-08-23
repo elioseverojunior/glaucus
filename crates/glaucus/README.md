@@ -15,7 +15,7 @@ behind Cargo feature flags, so you pull in only the representations you use.
 
 ```toml
 [dependencies]
-glaucus = "0.2"
+glaucus = "0.3"
 serde = { version = "1", features = ["derive"] }
 ```
 
