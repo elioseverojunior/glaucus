@@ -103,7 +103,24 @@ fn parse_float(value: &str) -> Option<f64> {
         ".inf" | "+.inf" => Some(f64::INFINITY),
         "-.inf" => Some(f64::NEG_INFINITY),
         ".nan" => Some(f64::NAN),
-        _ => value.parse::<f64>().ok(),
+
+        // The digit guard exists because Rust's `f64::from_str` also accepts
+        // `inf`, `infinity` and `nan`, which YAML 1.2 §10.2 does NOT recognise:
+        // the float production admits exactly `[-+]?\.(inf|Inf|INF)` and
+        // `\.(nan|NaN|NAN)`, matched above, and the leading dot is mandatory.
+        // Bare `inf` / `nan` / `infinity` are plain strings.
+        //
+        // Requiring at least one ASCII digit is a complete separator rather than a
+        // heuristic: every other form in the YAML float grammar
+        // (`[-+]?( \.[0-9]+ | [0-9]+(\.[0-9]*)? )([eE][-+]?[0-9]+)?`) contains a
+        // digit by construction, while the three bare words contain none.
+        //
+        // This is the Norway problem's shape -- implicit resolution firing on a
+        // word that should stay text -- and worse in consequence. A float infinity
+        // has no JSON representation, so an `inf` that resolved as a float becomes
+        // `null` on the way out. The value does not change type; it vanishes.
+        _ if value.bytes().any(|b| b.is_ascii_digit()) => value.parse::<f64>().ok(),
+        _ => None,
     }
 }
 
@@ -852,6 +869,88 @@ mod tests {
     fn de_string() {
         let result: String = from_str("hello").unwrap();
         assert_eq!(result, "hello");
+    }
+
+    // ─── YAML 1.2 float production ──────────────────────────────────
+
+    #[test]
+    fn bare_inf_and_nan_words_are_strings() {
+        // YAML 1.2 §10.2 admits exactly `[-+]?\.(inf|Inf|INF)` and
+        // `\.(nan|NaN|NAN)` -- the leading dot is mandatory, so the bare words
+        // are plain strings. Rust's `f64::from_str` accepts all three spellings,
+        // which is where the over-eager resolution came from.
+        for word in [
+            "inf",
+            "Inf",
+            "INF",
+            "infinity",
+            "Infinity",
+            "INFINITY",
+            "nan",
+            "NaN",
+            "NAN",
+            "-inf",
+            "+inf",
+            "-infinity",
+        ] {
+            let as_string: String = from_str(word).unwrap();
+            assert_eq!(as_string, word, "`{word}` must deserialise as a string");
+            assert!(
+                from_str::<f64>(word).is_err(),
+                "`{word}` must not deserialise as a float"
+            );
+        }
+    }
+
+    #[test]
+    fn bare_inf_is_a_string_under_dynamic_resolution() {
+        // `from_str::<String>` goes through `deserialize_string`; the bug lives in
+        // `deserialize_any`, which is the path a dynamically typed target takes.
+        // An untagged enum routes through `deserialize_any`, so this pins the
+        // classification chain itself rather than the typed shortcut.
+        //
+        // This is why the defect is worse than a plain type confusion: under
+        // dynamic resolution `inf` became a float, and a float infinity has no
+        // JSON representation -- serialising onward turns it into `null`. The
+        // value does not merely change type, it disappears.
+        #[derive(Deserialize, PartialEq, Debug)]
+        #[serde(untagged)]
+        enum Any {
+            Float(f64),
+            Text(String),
+        }
+
+        assert_eq!(
+            from_str::<Any>("inf").unwrap(),
+            Any::Text("inf".to_owned()),
+            "`inf` must not be classified as a float by deserialize_any"
+        );
+        assert_eq!(from_str::<Any>("nan").unwrap(), Any::Text("nan".to_owned()));
+        // The dotted form must still win the float arm.
+        assert!(matches!(from_str::<Any>(".inf").unwrap(), Any::Float(f) if f.is_infinite()));
+    }
+
+    #[test]
+    fn dotted_inf_and_nan_still_resolve_as_floats() {
+        assert!(from_str::<f64>(".inf").unwrap().is_infinite());
+        assert!(from_str::<f64>(".inf").unwrap().is_sign_positive());
+        assert!(from_str::<f64>("+.inf").unwrap().is_infinite());
+        assert!(from_str::<f64>("-.inf").unwrap().is_sign_negative());
+        assert!(from_str::<f64>(".nan").unwrap().is_nan());
+        assert!(from_str::<f64>(".NaN").unwrap().is_nan());
+        assert!(from_str::<f64>(".INF").unwrap().is_infinite());
+    }
+
+    #[test]
+    fn ordinary_floats_are_unaffected_by_the_digit_guard() {
+        // Every float in the YAML 1.2 grammar contains at least one digit, which
+        // is what makes the guard safe. These pin that down.
+        assert!((from_str::<f64>("1.5").unwrap() - 1.5).abs() < f64::EPSILON);
+        assert!((from_str::<f64>("-1.5e-3").unwrap() + 0.0015).abs() < 1e-12);
+        assert!((from_str::<f64>("1e10").unwrap() - 1e10).abs() < f64::EPSILON);
+        assert!((from_str::<f64>(".5").unwrap() - 0.5).abs() < f64::EPSILON);
+        assert!(from_str::<f64>("0.0").unwrap().abs() < f64::EPSILON);
+        assert!((from_str::<f64>("+3.25").unwrap() - 3.25).abs() < f64::EPSILON);
     }
 
     #[test]
