@@ -56,18 +56,21 @@
 /// large.
 pub const MAX_SAFE_DEPTH: usize = 192;
 
-/// The shallowest overflow measured across realistic builds: `opt-level = 0` on
-/// the 2 MiB stack Rust gives a spawned thread. Recorded as a constant so the
-/// margin below is checked by the compiler rather than trusted.
-const WORST_MEASURED_OVERFLOW_DEPTH: usize = 300;
-
 // Compile-time, not a test: raising `MAX_SAFE_DEPTH` without re-measuring should
 // fail the BUILD, not wait for someone to run the suite -- the failure mode it
 // guards against is an uncatchable abort in a consumer's process.
+//
+// `300` is the shallowest overflow measured across realistic builds:
+// `opt-level = 0` on the 2 MiB stack Rust gives a spawned thread. It is spelled
+// inline rather than named, because a named constant used ONLY by a `const _`
+// assertion is reported as dead code on the declared MSRV (1.88) even though
+// newer stable counts the const-eval as a use -- and `-D warnings` makes that
+// fatal. Suppressing the lint would hide real dead code later.
 const _: () = assert!(
-    MAX_SAFE_DEPTH * 3 / 2 <= WORST_MEASURED_OVERFLOW_DEPTH,
+    MAX_SAFE_DEPTH * 3 / 2 <= 300,
     "MAX_SAFE_DEPTH leaves under a 1.5x margin against the worst measured \
-     overflow depth; re-measure on a 2 MiB stack at opt-level 0 before raising it"
+     overflow depth (300, at opt-level 0 on a 2 MiB stack); re-measure there \
+     before raising it"
 );
 
 /// Configurable resource limits for YAML processing.
