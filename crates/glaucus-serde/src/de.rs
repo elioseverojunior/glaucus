@@ -97,6 +97,39 @@ fn parse_unsigned(value: &str) -> Option<u64> {
         )
 }
 
+/// A YAML core-schema tag, resolved to the type it asserts.
+///
+/// An explicit tag is the ONE mechanism a YAML author has to override implicit
+/// resolution — `!!str 123` to keep a version number text, `!!int "456"` to read
+/// a quoted field as a number. Ignoring it turns the author's explicit intent
+/// into a silently different value.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum CoreTag {
+    Str,
+    Int,
+    Float,
+    Bool,
+    Null,
+    Binary,
+}
+
+impl CoreTag {
+    /// Classifies a resolved tag URI, or `None` for anything not in the core
+    /// schema — custom and application tags must keep flowing through normal
+    /// resolution rather than being reinterpreted here.
+    fn from_uri(uri: &str) -> Option<Self> {
+        match uri.strip_prefix("tag:yaml.org,2002:")? {
+            "str" => Some(Self::Str),
+            "int" => Some(Self::Int),
+            "float" => Some(Self::Float),
+            "bool" => Some(Self::Bool),
+            "null" => Some(Self::Null),
+            "binary" => Some(Self::Binary),
+            _ => None,
+        }
+    }
+}
+
 fn parse_float(value: &str) -> Option<f64> {
     let lower = value.to_ascii_lowercase();
     match lower.as_str() {
@@ -139,6 +172,13 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'_> {
             Node::Mapping(_) => self.deserialize_map(visitor),
             Node::Scalar(s) => {
                 let value = &*s.value;
+
+                // An explicit core-schema tag overrides everything below --
+                // including the style shortcut, since `!!int "456"` is precisely
+                // the author overriding what the quotes would otherwise imply.
+                if let Some(tag) = self.core_tag() {
+                    return self.visit_core_tagged(tag, visitor);
+                }
 
                 // Quoted scalars are always strings.
                 // For Cow::Owned, call visit_string to pass the String directly
@@ -285,6 +325,12 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'_> {
     }
 
     fn deserialize_bytes<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Error> {
+        // `!!binary` is base64 in the source and bytes in the data model, so a
+        // bytes-shaped target must get the decoded payload rather than the
+        // encoding. Untagged scalars keep passing their UTF-8 through unchanged.
+        if self.core_tag() == Some(CoreTag::Binary) {
+            return self.visit_core_tagged(CoreTag::Binary, visitor);
+        }
         visitor.visit_bytes(self.scalar_value()?.as_bytes())
     }
 
@@ -435,6 +481,82 @@ impl Deserializer<'_> {
         match self.node {
             Node::Scalar(s) => Ok(&s.value),
             _ => Err(err("expected a scalar value")),
+        }
+    }
+
+    /// The core-schema tag on this node, if it carries one.
+    fn core_tag(&self) -> Option<CoreTag> {
+        match self.node {
+            Node::Scalar(s) => s.tag.as_ref().and_then(|t| CoreTag::from_uri(&t.value)),
+            _ => None,
+        }
+    }
+
+    /// Resolves a scalar according to its explicit core-schema tag.
+    ///
+    /// The tag wins over BOTH implicit resolution and the scalar's presentation
+    /// style. That is the whole point: quoting normally forces a string, and
+    /// `!!int "456"` is the author saying otherwise.
+    ///
+    /// Content that cannot satisfy the tag is an error rather than a coercion. A
+    /// tag is an assertion about the data, so `!!int "abc"` is a defect in the
+    /// document, and inventing a value for it would reintroduce exactly the class
+    /// of silent wrongness this resolution exists to remove.
+    fn visit_core_tagged<'de, V>(&self, tag: CoreTag, visitor: V) -> Result<V::Value, Error>
+    where
+        V: Visitor<'de>,
+    {
+        let value = self.scalar_value()?;
+
+        match tag {
+            // Any content is valid `!!str`; that is what makes it the escape hatch.
+            CoreTag::Str => visitor.visit_str(value),
+
+            CoreTag::Int => {
+                // Early returns rather than `map_or_else`: both arms would need to
+                // capture `visitor`, and it can only be moved into one closure.
+                if let Some(u) = parse_unsigned(value) {
+                    if let Ok(i) = i64::try_from(u) {
+                        return visitor.visit_i64(i);
+                    }
+                    return visitor.visit_u64(u);
+                }
+                parse_integer(value).map_or_else(
+                    || Err(err(format!("`!!int` scalar is not an integer: `{value}`"))),
+                    |i| visitor.visit_i64(i),
+                )
+            }
+
+            CoreTag::Float => parse_float(value).map_or_else(
+                || Err(err(format!("`!!float` scalar is not a float: `{value}`"))),
+                |f| visitor.visit_f64(f),
+            ),
+
+            // Reuses the deserialiser's own bool recognition, so `!!bool` widens
+            // to the YAML 1.1 spellings exactly when `yaml_1_1` is set and not
+            // otherwise. A second, divergent notion of "boolean" here would be a
+            // bug farm.
+            CoreTag::Bool => {
+                if self.is_bool_true(value) {
+                    return visitor.visit_bool(true);
+                }
+                if self.is_bool_false(value) {
+                    return visitor.visit_bool(false);
+                }
+                Err(err(format!("`!!bool` scalar is not a boolean: `{value}`")))
+            }
+
+            CoreTag::Null => {
+                if Self::is_null(value) {
+                    return visitor.visit_unit();
+                }
+                Err(err(format!("`!!null` scalar is not null: `{value}`")))
+            }
+
+            CoreTag::Binary => crate::base64::decode(value).map_or_else(
+                || Err(err("`!!binary` scalar is not valid base64")),
+                |bytes| visitor.visit_byte_buf(bytes),
+            ),
         }
     }
 
@@ -869,6 +991,145 @@ mod tests {
     fn de_string() {
         let result: String = from_str("hello").unwrap();
         assert_eq!(result, "hello");
+    }
+
+    // ─── Core-schema tag resolution ─────────────────────────────────
+
+    /// Routes through `deserialize_any`, which is where implicit resolution lives.
+    #[derive(Deserialize, PartialEq, Debug)]
+    #[serde(untagged)]
+    enum TagAny {
+        Bool(bool),
+        Int(i64),
+        Float(f64),
+        Text(String),
+        Unit,
+    }
+
+    /// A target that calls `deserialize_bytes`, so `!!binary` can be observed.
+    #[derive(PartialEq, Debug)]
+    struct TagBytes(Vec<u8>);
+
+    impl<'de> Deserialize<'de> for TagBytes {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            struct V;
+
+            impl Visitor<'_> for V {
+                type Value = TagBytes;
+
+                fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    f.write_str("binary data")
+                }
+
+                fn visit_bytes<E>(self, v: &[u8]) -> Result<TagBytes, E>
+                where
+                    E: de::Error,
+                {
+                    Ok(TagBytes(v.to_vec()))
+                }
+
+                fn visit_str<E>(self, v: &str) -> Result<TagBytes, E>
+                where
+                    E: de::Error,
+                {
+                    Ok(TagBytes(v.as_bytes().to_vec()))
+                }
+            }
+
+            deserializer.deserialize_bytes(V)
+        }
+    }
+
+    #[test]
+    fn tag_str_keeps_a_number_as_text() {
+        // The canonical reason `!!str` exists: force a version number or ZIP code
+        // to stay text. Silently producing an integer is a wrong value rather than
+        // an error, which is the most dangerous failure mode there is.
+        assert_eq!(
+            from_str::<TagAny>("!!str 123").unwrap(),
+            TagAny::Text("123".into())
+        );
+        assert_eq!(
+            from_str::<TagAny>("!!str 007").unwrap(),
+            TagAny::Text("007".into())
+        );
+        assert_eq!(
+            from_str::<TagAny>("!!str true").unwrap(),
+            TagAny::Text("true".into())
+        );
+    }
+
+    #[test]
+    fn tag_int_overrides_quoting() {
+        // Quoting normally forces a string. An explicit tag is the author's
+        // override of implicit resolution and must win over it.
+        assert_eq!(
+            from_str::<TagAny>("!!int \"456\"").unwrap(),
+            TagAny::Int(456)
+        );
+        assert_eq!(from_str::<i64>("!!int \"456\"").unwrap(), 456);
+    }
+
+    #[test]
+    fn tag_float_overrides_quoting() {
+        let v = from_str::<TagAny>("!!float \"3.15\"").unwrap();
+        assert!(matches!(v, TagAny::Float(f) if (f - 3.15).abs() < f64::EPSILON));
+    }
+
+    #[test]
+    fn tag_bool_overrides_quoting() {
+        assert_eq!(
+            from_str::<TagAny>("!!bool \"true\"").unwrap(),
+            TagAny::Bool(true)
+        );
+        assert_eq!(
+            from_str::<TagAny>("!!bool \"false\"").unwrap(),
+            TagAny::Bool(false)
+        );
+    }
+
+    #[test]
+    fn tag_null_overrides_quoting() {
+        assert_eq!(from_str::<TagAny>("!!null \"null\"").unwrap(), TagAny::Unit);
+        assert_eq!(from_str::<TagAny>("!!null ~").unwrap(), TagAny::Unit);
+    }
+
+    #[test]
+    fn tag_binary_is_base64_decoded() {
+        assert_eq!(
+            from_str::<TagBytes>("!!binary SGVsbG8gV29ybGQh").unwrap(),
+            TagBytes(b"Hello World!".to_vec())
+        );
+    }
+
+    #[test]
+    fn tag_binary_rejects_malformed_payloads() {
+        // Must error rather than silently hand back the undecoded string.
+        assert!(from_str::<TagBytes>("!!binary not@valid@base64").is_err());
+    }
+
+    #[test]
+    fn tag_content_mismatch_is_an_error() {
+        // A tag asserts a type. Content that cannot satisfy it is a defect in the
+        // document, and failing loudly beats coercing to something arbitrary.
+        assert!(from_str::<TagAny>("!!int \"abc\"").is_err());
+        assert!(from_str::<TagAny>("!!float \"xyz\"").is_err());
+        assert!(from_str::<TagAny>("!!bool \"maybe\"").is_err());
+    }
+
+    #[test]
+    fn untagged_scalars_keep_todays_resolution() {
+        // The fallback must be untouched for every document that carries no tag.
+        assert_eq!(from_str::<TagAny>("123").unwrap(), TagAny::Int(123));
+        assert_eq!(
+            from_str::<TagAny>("\"123\"").unwrap(),
+            TagAny::Text("123".into())
+        );
+        assert_eq!(from_str::<TagAny>("true").unwrap(), TagAny::Bool(true));
+        assert_eq!(from_str::<TagAny>("null").unwrap(), TagAny::Unit);
     }
 
     // ─── YAML 1.2 float production ──────────────────────────────────

@@ -28,6 +28,9 @@
 
 #![forbid(unsafe_code)]
 
+/// Base64 decoding for `!!binary` scalars. Internal: the decoder exists to
+/// serve tag resolution, not as a general-purpose codec.
+mod base64;
 pub mod borrowed;
 pub mod de;
 pub mod error;
