@@ -33,7 +33,7 @@ repository = "https://github.com/elioseverojunior/glaucus"
 # every publishable crate with it, so the number cannot drift again. Raising it
 # is a MINOR version bump with a CHANGELOG entry, never a patch.
 rust-version = "1.88"
-version = "0.3.0"
+version = "0.3.1"
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }
@@ -103,12 +103,12 @@ clap_complete = { version = ">=4,<5" }
 # `default-features = false` here so satellite crates inherit a minimal facade
 # and opt back in via `features = [...]`; cargo forbids a member flipping this
 # off if the workspace entry leaves it on.
-glaucus = { path = "crates/glaucus", version = "0.3.0", default-features = false }
-glaucus-ast = { path = "crates/glaucus-ast", version = "0.3.0" }
-glaucus-core = { path = "crates/glaucus-core", version = "0.3.0" }
-glaucus-cst = { path = "crates/glaucus-cst", version = "0.3.0" }
-glaucus-schema = { path = "crates/glaucus-schema", version = "0.3.0" }
-glaucus-serde = { path = "crates/glaucus-serde", version = "0.3.0" }
+glaucus = { path = "crates/glaucus", version = "0.3.1", default-features = false }
+glaucus-ast = { path = "crates/glaucus-ast", version = "0.3.1" }
+glaucus-core = { path = "crates/glaucus-core", version = "0.3.1" }
+glaucus-cst = { path = "crates/glaucus-cst", version = "0.3.1" }
+glaucus-schema = { path = "crates/glaucus-schema", version = "0.3.1" }
+glaucus-serde = { path = "crates/glaucus-serde", version = "0.3.1" }
 # Third-party dependencies shared by ≥2 members, pinned once here. Members bind
 # with `<dep>.workspace = true` and layer on extra `features` as needed.
 # `serde` is declared `default-features = false` so no_std-leaning crates inherit

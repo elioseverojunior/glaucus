@@ -1,6 +1,6 @@
 {
   "name": "glaucus-gh-pages",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Documentation site for the glaucus GitHub Action",
   "license": "MIT OR Apache-2.0",

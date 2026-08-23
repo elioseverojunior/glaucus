@@ -389,7 +389,7 @@ dependencies = [
 
 [[package]]
 name = "glaucus"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anstream",
  "anyhow",
@@ -411,14 +411,14 @@ dependencies = [
 
 [[package]]
 name = "glaucus-ast"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus-core",
 ]
 
 [[package]]
 name = "glaucus-bench"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "criterion",
  "glaucus",
@@ -435,25 +435,25 @@ dependencies = [
 
 [[package]]
 name = "glaucus-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus",
 ]
 
 [[package]]
 name = "glaucus-core"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "glaucus-cst"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus-core",
 ]
 
 [[package]]
 name = "glaucus-fuzz"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus-ast",
  "glaucus-core",
@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "glaucus-schema"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus-ast",
  "glaucus-core",
@@ -473,7 +473,7 @@ dependencies = [
 
 [[package]]
 name = "glaucus-serde"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus-ast",
  "glaucus-core",
@@ -482,7 +482,7 @@ dependencies = [
 
 [[package]]
 name = "glaucus-wasm"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus",
  "serde_json",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "glaucus-yaml-test-suite"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "glaucus",
  "glaucus-core",
