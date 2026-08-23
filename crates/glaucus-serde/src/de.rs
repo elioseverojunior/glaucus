@@ -814,9 +814,14 @@ pub fn from_str<T: DeserializeOwned + 'static>(input: &str) -> crate::error::Res
     }
 
     // An empty stream is a null document, not an error -- see
-    // `glaucus_ast::composer::compose_one`.
-    let node = glaucus_ast::composer::compose_one(input)?;
-    let mut de = Deserializer::from_node(&node);
+    // `glaucus_ast::composer::compose_one`. The version comes back alongside the
+    // node because a `%YAML 1.1` directive selects 1.1 scalar resolution for this
+    // document, and the node alone cannot say which schema applies to it.
+    let (node, version) = glaucus_ast::composer::compose_one_versioned(
+        input,
+        glaucus_core::error::ParserConfig::default(),
+    )?;
+    let mut de = Deserializer::from_node_with(&node, version.is_1_1());
     T::deserialize(&mut de)
 }
 
@@ -871,9 +876,13 @@ pub fn from_str_with<T: DeserializeOwned + 'static>(
             .expect("TypeId of T equals TypeId of Value, downcast is infallible"));
     }
 
+    // The config flag and the in-document directive are both honoured, and either
+    // one alone is enough. The flag is for callers whose input carries no
+    // directive; the directive is for documents that declare their own version.
+    // Neither can turn the other off.
     let yaml_1_1 = config.yaml_1_1;
-    let node = glaucus_ast::composer::compose_one_with(input, config)?;
-    let mut de = Deserializer::from_node_with(&node, yaml_1_1);
+    let (node, version) = glaucus_ast::composer::compose_one_versioned(input, config)?;
+    let mut de = Deserializer::from_node_with(&node, yaml_1_1 || version.is_1_1());
     T::deserialize(&mut de)
 }
 

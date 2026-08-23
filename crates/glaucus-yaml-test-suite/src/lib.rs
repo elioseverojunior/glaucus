@@ -160,7 +160,7 @@ fn event_to_tree_line(kind: &EventKind<'_>) -> String {
     match kind {
         EventKind::StreamStart => "+STR".to_string(),
         EventKind::StreamEnd => "-STR".to_string(),
-        EventKind::DocumentStart { explicit } => {
+        EventKind::DocumentStart { explicit, .. } => {
             if *explicit {
                 "+DOC ---".to_string()
             } else {

@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use glaucus_core::error::{Error, ErrorKind, ParserConfig, Result, Strictness};
 use glaucus_core::parser::Parser;
 use glaucus_core::parser::event::{Event, EventKind};
-use glaucus_core::types::{CollectionStyle, Position, ScalarStyle, Span, Tag};
+use glaucus_core::types::{CollectionStyle, Position, ScalarStyle, Span, Tag, YamlVersion};
 
 use crate::node::{Mapping, Node, Scalar, Sequence};
 
@@ -72,9 +72,23 @@ pub const fn null_node<'a>() -> Node<'a> {
 ///
 /// Returns a scan, parse or composition error for the document being read.
 pub fn compose_one(input: &str) -> Result<Node<'_>> {
-    Composer::new(input)
-        .next()
-        .unwrap_or_else(|| Ok(null_node()))
+    compose_one_versioned(input, ParserConfig::default()).map(|(node, _)| node)
+}
+
+/// Composes the first document and reports the YAML version in force for it.
+///
+/// The version comes from a `%YAML` directive when the document carries one.
+/// Callers that perform scalar resolution need both halves, which is why this
+/// exists alongside [`compose_one`] — the node alone cannot say which schema
+/// applies to it.
+///
+/// # Errors
+///
+/// Returns a scan, parse or composition error for the document being read.
+pub fn compose_one_versioned(input: &str, config: ParserConfig) -> Result<(Node<'_>, YamlVersion)> {
+    let mut composer = Composer::with_config(input, config);
+    let node = composer.next().unwrap_or_else(|| Ok(null_node()))?;
+    Ok((node, composer.document_version()))
 }
 
 /// [`compose_one`] with a caller-supplied parser configuration.
@@ -83,9 +97,7 @@ pub fn compose_one(input: &str) -> Result<Node<'_>> {
 ///
 /// Returns a scan, parse or composition error for the document being read.
 pub fn compose_one_with(input: &str, config: ParserConfig) -> Result<Node<'_>> {
-    Composer::with_config(input, config)
-        .next()
-        .unwrap_or_else(|| Ok(null_node()))
+    compose_one_versioned(input, config).map(|(node, _)| node)
 }
 
 /// Returns `true` if `node` is the plain merge key scalar `<<`.
@@ -128,6 +140,11 @@ pub struct Composer<'a> {
     config: ParserConfig,
     node_count: usize,
     alias_expansions: usize,
+    /// YAML version in force for the document most recently composed.
+    ///
+    /// Document-scoped: read off each `DocumentStart` event, so it tracks the
+    /// current document rather than accumulating across the stream.
+    doc_version: YamlVersion,
     /// Cumulative nodes materialised by alias expansion, per document.
     ///
     /// Tracked separately from `node_count` because they measure different
@@ -157,9 +174,19 @@ impl<'a> Composer<'a> {
             node_count: 0,
             alias_expansions: 0,
             alias_nodes: 0,
+            doc_version: YamlVersion::default(),
             errored: false,
             started: false,
         }
+    }
+
+    /// The YAML version in force for the document most recently composed.
+    ///
+    /// Defaults to [`YamlVersion::V1_2`] before any document is read, and after a
+    /// document that declared no `%YAML` directive.
+    #[must_use]
+    pub const fn document_version(&self) -> YamlVersion {
+        self.doc_version
     }
 
     /// Composes the next document, or `None` if the stream is exhausted.
@@ -186,8 +213,13 @@ impl<'a> Composer<'a> {
         self.alias_expansions = 0;
         self.alias_nodes = 0;
 
-        // Consume DocumentStart
-        let _doc_start = self.next_event()?;
+        // Consume DocumentStart, taking the document's YAML version off it. The
+        // version travels on the event because it is document-scoped -- reading it
+        // here is what stops one document's `%YAML` from applying to the next.
+        let doc_start = self.next_event()?;
+        if let EventKind::DocumentStart { version, .. } = doc_start.kind {
+            self.doc_version = version;
+        }
 
         // Compose root node
         let root = self.compose_node()?;

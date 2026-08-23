@@ -253,3 +253,68 @@ mod tests {
         assert_eq!(&*owned.value, "!!str");
     }
 }
+
+/// The YAML version in force for a single document.
+///
+/// Document-scoped by definition: a `%YAML` directive applies to the document it
+/// introduces and to nothing after it, so this resets at every document boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum YamlVersion {
+    /// YAML 1.1 semantics — notably the extended boolean spellings
+    /// (`yes`/`no`/`on`/`off`/`y`/`n`).
+    V1_1,
+    /// YAML 1.2 semantics. The default when no directive is present.
+    #[default]
+    V1_2,
+}
+
+impl YamlVersion {
+    /// Selects semantics from the `major.minor` of a `%YAML` directive.
+    ///
+    /// `1.1` selects 1.1 semantics. Every other `1.x` selects 1.2, because YAML
+    /// 1.2.2 says a 1.x document should be processed by the most recent 1.x
+    /// processor available — so an unknown future minor is read as 1.2 rather
+    /// than rejected.
+    #[must_use]
+    pub const fn from_directive(major: u8, minor: u8) -> Self {
+        if major == 1 && minor == 1 {
+            Self::V1_1
+        } else {
+            Self::V1_2
+        }
+    }
+
+    /// Whether YAML 1.1 scalar resolution applies.
+    #[must_use]
+    pub const fn is_1_1(self) -> bool {
+        matches!(self, Self::V1_1)
+    }
+}
+
+#[cfg(test)]
+mod yaml_version_tests {
+    use super::YamlVersion;
+
+    #[test]
+    fn only_1_1_selects_1_1_semantics() {
+        assert_eq!(YamlVersion::from_directive(1, 1), YamlVersion::V1_1);
+    }
+
+    #[test]
+    fn every_other_1_x_selects_1_2() {
+        // 1.2.2: a 1.x document is processed by the most recent 1.x processor.
+        for minor in [0u8, 2, 3, 9, 255] {
+            assert_eq!(
+                YamlVersion::from_directive(1, minor),
+                YamlVersion::V1_2,
+                "1.{minor} should select 1.2"
+            );
+        }
+    }
+
+    #[test]
+    fn defaults_to_1_2() {
+        assert_eq!(YamlVersion::default(), YamlVersion::V1_2);
+        assert!(!YamlVersion::default().is_1_1());
+    }
+}

@@ -32,6 +32,13 @@ pub enum EventKind<'a> {
     DocumentStart {
         /// Whether the document start was explicit (`---`).
         explicit: bool,
+        /// The YAML version in force for this document.
+        ///
+        /// Comes from a `%YAML` directive when present, otherwise
+        /// [`YamlVersion::V1_2`]. Carried on the event because the directive is
+        /// document-scoped: consumers must not let one document's version leak
+        /// into the next.
+        version: crate::types::YamlVersion,
     },
     /// End of a YAML document.
     DocumentEnd {
@@ -109,7 +116,11 @@ mod tests {
     fn event_kind_names() {
         assert_eq!(EventKind::StreamStart.name(), "stream-start");
         assert_eq!(
-            EventKind::DocumentStart { explicit: true }.name(),
+            EventKind::DocumentStart {
+                explicit: true,
+                version: crate::types::YamlVersion::V1_2,
+            }
+            .name(),
             "document-start"
         );
         assert_eq!(

@@ -142,6 +142,11 @@ pub struct Parser<'a> {
     /// Whether we've seen at least one document end that was implicit (no `...`).
     /// Directives are forbidden after an implicit document end (YAML 1.2.2 §9.2).
     implicit_doc_end: bool,
+    /// YAML version in force for the document currently being parsed.
+    ///
+    /// Reset to the default at the start of every document's directive block, so
+    /// a `%YAML` directive cannot leak past the document it introduces.
+    doc_version: crate::types::YamlVersion,
 }
 
 impl<'a> Parser<'a> {
@@ -165,6 +170,7 @@ impl<'a> Parser<'a> {
             errored: false,
             tag_directives: HashMap::with_capacity(4),
             implicit_doc_end: false,
+            doc_version: crate::types::YamlVersion::default(),
         }
     }
 
@@ -362,6 +368,12 @@ impl<'a> Parser<'a> {
     /// Returns whether any directive was seen. Directives must be followed
     /// by a document, which the caller enforces against what comes next.
     fn collect_document_directives(&mut self) -> Result<bool> {
+        // Reset per-document directive state. The version resets for the same
+        // reason the tag directives do: both are document-scoped, and letting
+        // either survive a `---` boundary would apply one document's declarations
+        // to the next.
+        self.doc_version = crate::types::YamlVersion::default();
+
         // Reset tag directives for this document and register defaults
         self.tag_directives.clear();
         self.tag_directives
@@ -403,6 +415,15 @@ impl<'a> Parser<'a> {
                     }
                     has_version_directive = true;
                     has_any_directive = true;
+                    // Read the version off the token before consuming it. It was
+                    // previously discarded here, which is why the directive
+                    // parsed but never reached resolution.
+                    if let Some(TokenKind::VersionDirective { major, minor }) =
+                        self.peek_token_kind()?
+                    {
+                        self.doc_version =
+                            crate::types::YamlVersion::from_directive(*major, *minor);
+                    }
                     self.next_token()?;
                 }
                 Some(TokenKind::TagDirective { .. }) => {
@@ -443,7 +464,10 @@ impl<'a> Parser<'a> {
                 let token = self.require_token()?;
                 self.state = State::DocumentContent;
                 Ok(Some(Event {
-                    kind: EventKind::DocumentStart { explicit: true },
+                    kind: EventKind::DocumentStart {
+                        explicit: true,
+                        version: self.doc_version,
+                    },
                     span: token.span,
                 }))
             }
@@ -491,7 +515,10 @@ impl<'a> Parser<'a> {
                     .map_or(Span::point(Position::start()), |t| t.span);
                 self.state = State::DocumentContent;
                 Ok(Some(Event {
-                    kind: EventKind::DocumentStart { explicit: false },
+                    kind: EventKind::DocumentStart {
+                        explicit: false,
+                        version: self.doc_version,
+                    },
                     span,
                 }))
             }
@@ -1394,11 +1421,60 @@ mod tests {
     }
 
     #[test]
+    fn version_directive_is_captured_on_document_start() {
+        let events = parse("%YAML 1.1\n---\nhello\n");
+        assert!(
+            matches!(
+                &events[1],
+                EventKind::DocumentStart {
+                    version: crate::types::YamlVersion::V1_1,
+                    ..
+                }
+            ),
+            "the %YAML 1.1 directive must reach DocumentStart, got {:?}",
+            events[1]
+        );
+    }
+
+    #[test]
+    fn version_resets_between_documents() {
+        // `%YAML` is document-scoped. Without the reset, document 2 would inherit
+        // document 1's declared version.
+        let events = parse("%YAML 1.1\n---\na\n---\nb\n");
+        let starts: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                EventKind::DocumentStart { version, .. } => Some(*version),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(starts.len(), 2, "expected two documents");
+        assert_eq!(starts[0], crate::types::YamlVersion::V1_1);
+        assert_eq!(
+            starts[1],
+            crate::types::YamlVersion::V1_2,
+            "the directive must not carry into the next document"
+        );
+    }
+
+    #[test]
+    fn absent_directive_yields_1_2() {
+        let events = parse("hello\n");
+        assert!(matches!(
+            &events[1],
+            EventKind::DocumentStart {
+                version: crate::types::YamlVersion::V1_2,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn explicit_document() {
         let events = parse("---\nhello\n...");
         assert!(matches!(
             &events[1],
-            EventKind::DocumentStart { explicit: true }
+            EventKind::DocumentStart { explicit: true, .. }
         ));
         assert!(matches!(
             &events[3],

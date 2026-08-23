@@ -705,3 +705,64 @@ fn non_empty_documents_are_unaffected() {
     let s: String = glaucus::from_str("hello").unwrap();
     assert_eq!(s, "hello");
 }
+
+// ─── %YAML 1.1 directive drives resolution (#29) ────────────────────
+
+#[test]
+fn yaml_1_1_directive_resolves_extended_booleans() {
+    for word in ["yes", "Yes", "YES", "on", "On", "ON"] {
+        let v: bool = glaucus::from_str(&format!("%YAML 1.1\n---\n{word}\n"))
+            .unwrap_or_else(|e| panic!("{word} under %YAML 1.1: {e}"));
+        assert!(v, "{word} should be true under %YAML 1.1");
+    }
+    for word in ["no", "No", "NO", "off", "Off", "OFF"] {
+        let v: bool = glaucus::from_str(&format!("%YAML 1.1\n---\n{word}\n"))
+            .unwrap_or_else(|e| panic!("{word} under %YAML 1.1: {e}"));
+        assert!(!v, "{word} should be false under %YAML 1.1");
+    }
+}
+
+#[test]
+fn without_the_directive_1_2_resolution_still_applies() {
+    // The default must not move. `yes` is a string under YAML 1.2.
+    let s: String = glaucus::from_str("yes").unwrap();
+    assert_eq!(s, "yes");
+    assert!(glaucus::from_str::<bool>("yes").is_err());
+}
+
+#[test]
+fn any_other_1_x_version_selects_1_2_semantics() {
+    // YAML 1.2.2: a 1.x document should be processed by the most recent 1.x
+    // processor, so an unknown minor reads as 1.2 rather than being rejected.
+    for version in ["1.0", "1.2", "1.3"] {
+        let s: String = glaucus::from_str(&format!("%YAML {version}\n---\nyes\n"))
+            .unwrap_or_else(|e| panic!("%YAML {version}: {e}"));
+        assert_eq!(s, "yes", "%YAML {version} should use 1.2 resolution");
+    }
+}
+
+#[test]
+fn the_directive_does_not_carry_across_a_document_boundary() {
+    // `%YAML` is document-scoped. The second document declares nothing and must
+    // get 1.2, so deserialising both as bool has to fail on the second.
+    let all: Vec<Result<bool, _>> = vec![
+        glaucus::from_str_multi::<bool>("%YAML 1.1\n---\nyes\n---\nyes\n").map(|v: Vec<bool>| v[0]),
+    ];
+    assert!(
+        all[0].is_err(),
+        "the directive must not apply to the second document"
+    );
+}
+
+#[test]
+fn config_flag_still_overrides_when_no_directive_is_present() {
+    let cfg = glaucus::error::ParserConfig {
+        yaml_1_1: true,
+        ..Default::default()
+    };
+    let v: bool = glaucus::from_str_with("yes", cfg).unwrap();
+    assert!(
+        v,
+        "ParserConfig::yaml_1_1 must still work without a directive"
+    );
+}
