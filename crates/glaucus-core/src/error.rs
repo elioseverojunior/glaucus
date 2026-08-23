@@ -122,6 +122,16 @@ pub enum ErrorKind {
         /// The configured limit.
         limit: usize,
     },
+    /// Maximum cumulative alias materialisation exceeded.
+    ///
+    /// Distinct from [`AliasExpansionLimitExceeded`](Self::AliasExpansionLimitExceeded),
+    /// which counts how many times an alias *appears*. This one counts how many
+    /// nodes those appearances actually *materialise*, which is the quantity a
+    /// billion-laughs document inflates.
+    AliasMaterializationLimitExceeded {
+        /// The configured limit.
+        limit: usize,
+    },
 
     // ─── Policy errors ──────────────────────────────────────────────
     /// An anchor or alias was present but the `deny_anchors` policy is active.
@@ -184,6 +194,7 @@ impl Error {
                 | ErrorKind::DocumentSizeLimitExceeded { .. }
                 | ErrorKind::KeyLengthLimitExceeded { .. }
                 | ErrorKind::NodeCountLimitExceeded { .. }
+                | ErrorKind::AliasMaterializationLimitExceeded { .. }
         )
     }
 
@@ -237,6 +248,17 @@ impl Error {
         Self::new(
             ErrorKind::NodeCountLimitExceeded {
                 limit: limits.max_node_count,
+            },
+            span,
+        )
+    }
+
+    /// Creates an alias materialisation limit exceeded error.
+    #[must_use]
+    pub const fn alias_materialization_exceeded(limits: &ResourceLimits, span: Span) -> Self {
+        Self::new(
+            ErrorKind::AliasMaterializationLimitExceeded {
+                limit: limits.max_total_alias_nodes,
             },
             span,
         )
@@ -301,6 +323,12 @@ impl fmt::Display for ErrorKind {
             }
             Self::NodeCountLimitExceeded { limit } => {
                 write!(f, "maximum node count exceeded (limit: {limit})")
+            }
+            Self::AliasMaterializationLimitExceeded { limit } => {
+                write!(
+                    f,
+                    "maximum cumulative alias materialisation exceeded (limit: {limit} nodes)"
+                )
             }
 
             // Policy

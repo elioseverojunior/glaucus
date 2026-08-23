@@ -26,6 +26,7 @@
 /// - **Huge documents**: Memory exhaustion → [`max_document_size`](Self::max_document_size)
 /// - **Huge keys**: Memory exhaustion → [`max_key_length`](Self::max_key_length)
 /// - **Node flood**: CPU exhaustion → [`max_node_count`](Self::max_node_count)
+/// - **Alias amplification**: memory exhaustion → [`max_total_alias_nodes`](Self::max_total_alias_nodes)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct ResourceLimits {
@@ -39,6 +40,25 @@ pub struct ResourceLimits {
     pub max_key_length: usize,
     /// Maximum number of nodes in the representation graph. Default: 1,000,000.
     pub max_node_count: usize,
+    /// Maximum cumulative nodes materialised by alias expansion. Default: 100,000.
+    ///
+    /// This is deliberately **not** the same quantity as
+    /// [`max_node_count`](Self::max_node_count), which counts parser *events* —
+    /// that is, the size of the source document. An alias resolves by cloning the
+    /// anchored subtree, so a document whose event count is trivially small can
+    /// still materialise an arbitrarily large tree. Counting events cannot observe
+    /// that growth, because the cloned nodes were never parsed.
+    ///
+    /// This limit counts the other quantity: the total nodes conjured by alias
+    /// expansion across a document. It is what bounds the classic billion-laughs
+    /// amplification, where source size grows linearly while the materialised tree
+    /// grows exponentially.
+    ///
+    /// The default is conservative on purpose. Materialising 100,000 nodes through
+    /// anchors is already orders of magnitude beyond any real configuration file,
+    /// and this module's contract is that defaults are safe and callers opt in
+    /// explicitly to raise them.
+    pub max_total_alias_nodes: usize,
 }
 
 impl Default for ResourceLimits {
@@ -49,6 +69,7 @@ impl Default for ResourceLimits {
             max_document_size: 256 * 1024 * 1024, // 256 MiB
             max_key_length: 1_024,
             max_node_count: 1_000_000,
+            max_total_alias_nodes: 100_000,
         }
     }
 }
@@ -62,6 +83,7 @@ impl ResourceLimits {
             max_document_size: usize::MAX,
             max_key_length: usize::MAX,
             max_node_count: usize::MAX,
+            max_total_alias_nodes: usize::MAX,
         }
     }
 }
@@ -78,6 +100,7 @@ mod tests {
         assert_eq!(limits.max_document_size, 256 * 1024 * 1024);
         assert_eq!(limits.max_key_length, 1_024);
         assert_eq!(limits.max_node_count, 1_000_000);
+        assert_eq!(limits.max_total_alias_nodes, 100_000);
     }
 
     #[test]
@@ -85,5 +108,6 @@ mod tests {
         let limits = ResourceLimits::unlimited();
         assert_eq!(limits.max_depth, usize::MAX);
         assert_eq!(limits.max_alias_expansions, usize::MAX);
+        assert_eq!(limits.max_total_alias_nodes, usize::MAX);
     }
 }

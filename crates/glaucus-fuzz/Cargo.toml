@@ -78,5 +78,11 @@ name = "fuzz_merge_keys"
 path = "fuzz_targets/fuzz_merge_keys.rs"
 test = false
 
+[[bin]]
+doc = false
+name = "fuzz_alias_graph"
+path = "fuzz_targets/fuzz_alias_graph.rs"
+test = false
+
 [lints]
 workspace = true

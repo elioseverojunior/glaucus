@@ -85,6 +85,13 @@ pub struct Composer<'a> {
     config: ParserConfig,
     node_count: usize,
     alias_expansions: usize,
+    /// Cumulative nodes materialised by alias expansion, per document.
+    ///
+    /// Tracked separately from `node_count` because they measure different
+    /// things: `node_count` counts parser *events* (the source document), while
+    /// this counts nodes conjured by *cloning* an anchored subtree. A
+    /// billion-laughs document keeps the former tiny while inflating the latter.
+    alias_nodes: usize,
     errored: bool,
     started: bool,
 }
@@ -106,6 +113,7 @@ impl<'a> Composer<'a> {
             config,
             node_count: 0,
             alias_expansions: 0,
+            alias_nodes: 0,
             errored: false,
             started: false,
         }
@@ -133,6 +141,7 @@ impl<'a> Composer<'a> {
         self.anchors.clear();
         self.node_count = 0;
         self.alias_expansions = 0;
+        self.alias_nodes = 0;
 
         // Consume DocumentStart
         let _doc_start = self.next_event()?;
@@ -504,10 +513,43 @@ impl<'a> Composer<'a> {
         Ok(())
     }
 
-    fn resolve_alias(&self, name: &str, span: Span) -> Result<Node<'a>> {
+    fn resolve_alias(&mut self, name: &str, span: Span) -> Result<Node<'a>> {
         if self.config.policies.deny_anchors {
             return Err(Error::new(ErrorKind::AnchorsDenied, span));
         }
+
+        // Measure inside a scope so the immutable borrow of `anchors` ends before
+        // the charge below mutates `self`.
+        let nodes = match self.anchors.get(name) {
+            Some(anchored) => subtree_node_count(anchored),
+            None => {
+                return Err(Error::new(
+                    ErrorKind::UndefinedAlias(name.to_string()),
+                    span,
+                ));
+            }
+        };
+
+        // Check AND charge BEFORE a single node is allocated.
+        //
+        // The ordering is the entire mitigation, not a stylistic preference.
+        // Charging after the clone still "has a check", but lets one unbounded
+        // allocation through first -- and one is all the attack needs, because
+        // each level of a billion-laughs document is itself the whole payload.
+        //
+        // `saturating_add` because the running total is attacker-influenced;
+        // wrapping it would turn this bound into a bypass.
+        self.alias_nodes = self.alias_nodes.saturating_add(nodes);
+        if self.alias_nodes > self.config.limits.max_total_alias_nodes {
+            return Err(Error::alias_materialization_exceeded(
+                &self.config.limits,
+                span,
+            ));
+        }
+
+        // Only now materialise. The lookup succeeded above and nothing since has
+        // touched the anchor map, but it is re-checked rather than indexed so a
+        // future refactor cannot turn this into a panic on attacker input.
         self.anchors
             .get(name)
             .cloned()
@@ -557,6 +599,33 @@ impl<'a> Iterator for Composer<'a> {
             }
         }
     }
+}
+
+/// Counts the nodes in `node`, including `node` itself.
+///
+/// Deliberately **iterative**. A recursive walk would stack-overflow on a deeply
+/// nested tree *before* the alias budget could fire, making the budget
+/// unreachable in exactly the case it exists to defend -- a crash instead of a
+/// clean error. An explicit work-list has no such ceiling.
+fn subtree_node_count(node: &Node<'_>) -> usize {
+    let mut count = 0usize;
+    let mut stack = vec![node];
+
+    while let Some(current) = stack.pop() {
+        count += 1;
+        match current {
+            Node::Scalar(_) => {}
+            Node::Sequence(seq) => stack.extend(seq.items.iter()),
+            Node::Mapping(map) => {
+                for (key, value) in &map.entries {
+                    stack.push(key);
+                    stack.push(value);
+                }
+            }
+        }
+    }
+
+    count
 }
 
 #[cfg(test)]
@@ -935,6 +1004,92 @@ mod tests {
         assert!(
             result.iter().any(std::result::Result::is_err),
             "expected alias expansion error"
+        );
+    }
+
+    /// Builds the classic billion-laughs shape: each level references the
+    /// previous one `fanout` times, so the *materialised* tree grows
+    /// exponentially while the source text grows linearly.
+    fn alias_bomb(levels: usize, fanout: usize) -> String {
+        use std::fmt::Write as _;
+
+        let mut src = String::from("a0: &a0 [x]\n");
+        for level in 1..=levels {
+            let refs = vec![format!("*a{}", level - 1); fanout].join(", ");
+            writeln!(src, "a{level}: &a{level} [{refs}]").unwrap();
+        }
+        src
+    }
+
+    fn has_materialization_error(results: &[Result<Node<'_>>]) -> bool {
+        results.iter().any(|r| {
+            matches!(
+                r,
+                Err(e) if matches!(e.kind, ErrorKind::AliasMaterializationLimitExceeded { .. })
+            )
+        })
+    }
+
+    #[test]
+    fn alias_materialization_respects_explicit_limit() {
+        // `&a` is a 3-element sequence: 1 sequence node + 3 scalars = 4 nodes.
+        // Two aliases therefore materialise 8 nodes, which a limit of 5 refuses.
+        let config = ParserConfig {
+            limits: ResourceLimits {
+                max_total_alias_nodes: 5,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut composer = Composer::with_config("- &a [1, 2, 3]\n- *a\n- *a\n", config);
+        let results: Vec<_> = composer.by_ref().collect();
+        assert!(
+            has_materialization_error(&results),
+            "expected an alias materialisation limit error, got {results:?}"
+        );
+    }
+
+    #[test]
+    fn alias_materialization_allows_ordinary_documents() {
+        // The limit must not fire on the anchor usage real configuration files
+        // contain. Guards against fixing the bomb by breaking anchors outright.
+        let src = "defaults: &d\n  a: 1\n  b: 2\nfirst:\n  <<: *d\nsecond:\n  <<: *d\n";
+        let results: Vec<_> = Composer::new(src).collect();
+        assert!(
+            results.iter().all(std::result::Result::is_ok),
+            "ordinary anchor reuse must not trip the limit: {results:?}"
+        );
+    }
+
+    #[test]
+    fn alias_bomb_is_rejected_under_default_limits() {
+        // Under DEFAULT limits -- an attacker does not opt into a hardened
+        // configuration. The source is a few hundred bytes; the tree it asks for
+        // is millions of nodes.
+        let src = alias_bomb(6, 9);
+        assert!(src.len() < 1024, "source should stay tiny: {} B", src.len());
+
+        let results: Vec<_> = Composer::new(&src).collect();
+        assert!(
+            has_materialization_error(&results),
+            "a sub-kilobyte alias bomb was accepted under default limits"
+        );
+    }
+
+    #[test]
+    fn alias_bomb_rejection_is_bounded_in_time() {
+        // Rejecting must be cheap. If the limit only fired *after* the offending
+        // clone, this would still "have a check" while allowing the allocation
+        // that makes the attack work -- and the wall clock would show it.
+        let src = alias_bomb(8, 9);
+        let start = std::time::Instant::now();
+        let results: Vec<_> = Composer::new(&src).collect();
+        let elapsed = start.elapsed();
+
+        assert!(has_materialization_error(&results), "bomb accepted");
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "rejection took {elapsed:?}; the check is running after the allocation"
         );
     }
 

@@ -18,6 +18,7 @@ fuzz_target!(|data: &[u8]| {
                 max_document_size: 4096,
                 max_key_length: 64,
                 max_node_count: 64,
+                max_total_alias_nodes: 64,
             },
             ..Default::default()
         };
