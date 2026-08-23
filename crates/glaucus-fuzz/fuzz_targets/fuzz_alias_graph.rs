@@ -41,6 +41,9 @@ fuzz_target!(|data: &[u8]| {
                 // The limit under test. Small, so a bomb trips it quickly and the
                 // fuzzer is not spending its budget allocating.
                 max_total_alias_nodes: 512,
+                // Generous: anchors are the raw material this target needs.
+                max_anchors: 4_096,
+                max_anchor_name_length: 256,
             },
             ..Default::default()
         };

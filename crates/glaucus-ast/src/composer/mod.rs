@@ -508,6 +508,31 @@ impl<'a> Composer<'a> {
             return Err(Error::new(ErrorKind::AnchorsDenied, node.span()));
         }
         if let Some(name) = anchor {
+            // Both checks run BEFORE `into_owned()`, because that call IS the
+            // allocation. Checking afterwards would mean the process had already
+            // paid the memory the cap exists to refuse -- the same
+            // before-versus-after ordering that makes an alias budget a real
+            // mitigation rather than a formality.
+            if name.len() > self.config.limits.max_anchor_name_length {
+                return Err(Error::anchor_name_length_exceeded(
+                    &self.config.limits,
+                    node.span(),
+                ));
+            }
+
+            // Charged only for a name not already present. YAML permits an anchor
+            // name to be redefined later in a document, and a redefinition reuses
+            // its existing slot rather than growing the map, so counting it would
+            // reject a legal document that costs nothing extra.
+            if !self.anchors.contains_key(name.as_ref())
+                && self.anchors.len() >= self.config.limits.max_anchors
+            {
+                return Err(Error::anchor_count_exceeded(
+                    &self.config.limits,
+                    node.span(),
+                ));
+            }
+
             self.anchors.insert(name.into_owned(), node.clone());
         }
         Ok(())
@@ -1090,6 +1115,85 @@ mod tests {
         assert!(
             elapsed < std::time::Duration::from_secs(5),
             "rejection took {elapsed:?}; the check is running after the allocation"
+        );
+    }
+
+    #[test]
+    fn anchor_name_length_is_capped() {
+        // `max_key_length` bounds mapping KEYS, not anchor names, so without a cap
+        // of its own an attacker-controlled name is allocated and inserted into
+        // the anchor map at whatever size the document asks for.
+        let config = ParserConfig {
+            limits: ResourceLimits {
+                max_anchor_name_length: 8,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let name = "a".repeat(64);
+        let src = format!("k: &{name} v\n");
+        let results: Vec<_> = Composer::with_config(&src, config).collect();
+        assert!(
+            results.iter().any(|r| matches!(
+                r,
+                Err(e) if matches!(e.kind, ErrorKind::AnchorNameLengthLimitExceeded { .. })
+            )),
+            "expected an anchor-name length error, got {results:?}"
+        );
+    }
+
+    #[test]
+    fn anchor_count_is_capped() {
+        use std::fmt::Write as _;
+
+        let config = ParserConfig {
+            limits: ResourceLimits {
+                max_anchors: 3,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut src = String::new();
+        for i in 0..10 {
+            writeln!(src, "k{i}: &a{i} v").unwrap();
+        }
+        let results: Vec<_> = Composer::with_config(&src, config).collect();
+        assert!(
+            results.iter().any(|r| matches!(
+                r,
+                Err(e) if matches!(e.kind, ErrorKind::AnchorCountLimitExceeded { .. })
+            )),
+            "expected an anchor-count error, got {results:?}"
+        );
+    }
+
+    #[test]
+    fn ordinary_anchor_usage_is_unaffected_by_the_caps() {
+        // Defaults must not fire on the anchor usage real documents contain.
+        let src = "defaults: &d\n  a: 1\nfirst:\n  <<: *d\nsecond:\n  <<: *d\n";
+        let results: Vec<_> = Composer::new(src).collect();
+        assert!(
+            results.iter().all(std::result::Result::is_ok),
+            "default caps must not fire on ordinary anchors: {results:?}"
+        );
+    }
+
+    #[test]
+    fn anchor_caps_reset_between_documents() {
+        // The counts are per-document, matching node_count. Two documents each
+        // under the cap must not sum into a rejection.
+        let config = ParserConfig {
+            limits: ResourceLimits {
+                max_anchors: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let src = "a: &x 1\n---\nb: &y 2\n";
+        let results: Vec<_> = Composer::with_config(src, config).collect();
+        assert!(
+            results.iter().all(std::result::Result::is_ok),
+            "anchor count must reset between documents: {results:?}"
         );
     }
 

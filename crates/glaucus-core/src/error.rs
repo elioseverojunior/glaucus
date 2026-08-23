@@ -132,6 +132,16 @@ pub enum ErrorKind {
         /// The configured limit.
         limit: usize,
     },
+    /// Maximum number of anchors in one document exceeded.
+    AnchorCountLimitExceeded {
+        /// The configured limit.
+        limit: usize,
+    },
+    /// Maximum anchor-name length exceeded.
+    AnchorNameLengthLimitExceeded {
+        /// The configured limit.
+        limit: usize,
+    },
 
     // ─── Policy errors ──────────────────────────────────────────────
     /// An anchor or alias was present but the `deny_anchors` policy is active.
@@ -195,6 +205,8 @@ impl Error {
                 | ErrorKind::KeyLengthLimitExceeded { .. }
                 | ErrorKind::NodeCountLimitExceeded { .. }
                 | ErrorKind::AliasMaterializationLimitExceeded { .. }
+                | ErrorKind::AnchorCountLimitExceeded { .. }
+                | ErrorKind::AnchorNameLengthLimitExceeded { .. }
         )
     }
 
@@ -259,6 +271,28 @@ impl Error {
         Self::new(
             ErrorKind::AliasMaterializationLimitExceeded {
                 limit: limits.max_total_alias_nodes,
+            },
+            span,
+        )
+    }
+
+    /// Creates an anchor count limit exceeded error.
+    #[must_use]
+    pub const fn anchor_count_exceeded(limits: &ResourceLimits, span: Span) -> Self {
+        Self::new(
+            ErrorKind::AnchorCountLimitExceeded {
+                limit: limits.max_anchors,
+            },
+            span,
+        )
+    }
+
+    /// Creates an anchor name length limit exceeded error.
+    #[must_use]
+    pub const fn anchor_name_length_exceeded(limits: &ResourceLimits, span: Span) -> Self {
+        Self::new(
+            ErrorKind::AnchorNameLengthLimitExceeded {
+                limit: limits.max_anchor_name_length,
             },
             span,
         )
@@ -328,6 +362,15 @@ impl fmt::Display for ErrorKind {
                 write!(
                     f,
                     "maximum cumulative alias materialisation exceeded (limit: {limit} nodes)"
+                )
+            }
+            Self::AnchorCountLimitExceeded { limit } => {
+                write!(f, "maximum anchor count exceeded (limit: {limit})")
+            }
+            Self::AnchorNameLengthLimitExceeded { limit } => {
+                write!(
+                    f,
+                    "maximum anchor name length exceeded (limit: {limit} bytes)"
                 )
             }
 

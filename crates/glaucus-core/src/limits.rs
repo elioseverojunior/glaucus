@@ -27,6 +27,8 @@
 /// - **Huge keys**: Memory exhaustion → [`max_key_length`](Self::max_key_length)
 /// - **Node flood**: CPU exhaustion → [`max_node_count`](Self::max_node_count)
 /// - **Alias amplification**: memory exhaustion → [`max_total_alias_nodes`](Self::max_total_alias_nodes)
+/// - **Anchor flood**: memory exhaustion → [`max_anchors`](Self::max_anchors)
+/// - **Huge anchor names**: memory exhaustion → [`max_anchor_name_length`](Self::max_anchor_name_length)
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[must_use]
 pub struct ResourceLimits {
@@ -59,6 +61,18 @@ pub struct ResourceLimits {
     /// and this module's contract is that defaults are safe and callers opt in
     /// explicitly to raise them.
     pub max_total_alias_nodes: usize,
+    /// Maximum number of distinct anchors in one document. Default: 1,024.
+    ///
+    /// Every anchor is retained for the whole document so a later alias can find
+    /// it, so the anchor map is a per-document allocation an author controls
+    /// directly. Bounding the count bounds that map.
+    pub max_anchors: usize,
+    /// Maximum length of an anchor name in bytes. Default: 1,024.
+    ///
+    /// [`max_key_length`](Self::max_key_length) bounds mapping *keys* and does not
+    /// reach anchor names, which are a separate attacker-controlled string that
+    /// gets owned and used as a map key.
+    pub max_anchor_name_length: usize,
 }
 
 impl Default for ResourceLimits {
@@ -70,6 +84,8 @@ impl Default for ResourceLimits {
             max_key_length: 1_024,
             max_node_count: 1_000_000,
             max_total_alias_nodes: 100_000,
+            max_anchors: 1_024,
+            max_anchor_name_length: 1_024,
         }
     }
 }
@@ -84,6 +100,8 @@ impl ResourceLimits {
             max_key_length: usize::MAX,
             max_node_count: usize::MAX,
             max_total_alias_nodes: usize::MAX,
+            max_anchors: usize::MAX,
+            max_anchor_name_length: usize::MAX,
         }
     }
 }
@@ -101,6 +119,8 @@ mod tests {
         assert_eq!(limits.max_key_length, 1_024);
         assert_eq!(limits.max_node_count, 1_000_000);
         assert_eq!(limits.max_total_alias_nodes, 100_000);
+        assert_eq!(limits.max_anchors, 1_024);
+        assert_eq!(limits.max_anchor_name_length, 1_024);
     }
 
     #[test]
@@ -109,5 +129,7 @@ mod tests {
         assert_eq!(limits.max_depth, usize::MAX);
         assert_eq!(limits.max_alias_expansions, usize::MAX);
         assert_eq!(limits.max_total_alias_nodes, usize::MAX);
+        assert_eq!(limits.max_anchors, usize::MAX);
+        assert_eq!(limits.max_anchor_name_length, usize::MAX);
     }
 }
