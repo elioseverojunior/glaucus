@@ -211,11 +211,16 @@ impl Error {
     }
 
     /// Creates a depth limit exceeded error.
+    ///
+    /// Reports the *effective* limit rather than the requested one. Those differ
+    /// whenever `max_depth` is raised past `limits::MAX_SAFE_DEPTH`, and a message
+    /// naming a limit the input did not actually exceed — "maximum nesting depth
+    /// exceeded (limit: 18446744073709551615)" — would be worse than useless.
     #[must_use]
     pub const fn depth_exceeded(limits: &ResourceLimits, span: Span) -> Self {
         Self::new(
             ErrorKind::DepthLimitExceeded {
-                limit: limits.max_depth,
+                limit: limits.effective_max_depth(),
             },
             span,
         )

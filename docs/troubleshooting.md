@@ -45,7 +45,8 @@ use glaucus_core::limits::ResourceLimits;
 
 let config = ParserConfig {
     limits: ResourceLimits {
-        max_depth: 512,                 // default: 128 -- see the caveat below
+        // Capped at MAX_SAFE_DEPTH (192) however high this is set -- see below.
+        max_depth: 192,                 // default: 128
         max_node_count: 10_000_000,     // default: 1_000_000
         max_total_alias_nodes: 500_000, // default: 100_000
         max_scalar_length: 64 << 20,    // default: 10 MiB
@@ -55,11 +56,14 @@ let config = ParserConfig {
 };
 ```
 
-> **Raising `max_depth` is not currently safe past a few thousand.** Composition
-> is recursive, so a document deep enough to pass a raised limit can overflow the
-> stack and **abort** the process rather than returning an error. The same applies
-> to `ResourceLimits::unlimited()` on deep input. Tracked in
-> [#33](https://github.com/elioseverojunior/glaucus/issues/33).
+> **`max_depth` is clamped and cannot be raised past 192.** Composition is
+> recursive, so a document deep enough to pass a raised limit would overflow the
+> stack and **abort** — uncatchable, taking the process with it. The effective
+> limit is `min(max_depth, MAX_SAFE_DEPTH)`, so setting it higher (or calling
+> `ResourceLimits::unlimited()`) gives you a clean `DepthLimitExceeded` instead.
+> If you need genuinely deeper documents, say so on
+> [#33](https://github.com/elioseverojunior/glaucus/issues/33) — lifting the
+> ceiling means making composition iterative.
 
 ### Block scalar content is wrong
 

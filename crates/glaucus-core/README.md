@@ -157,7 +157,7 @@ trusted input only).
 
 | Field                    | Default     | Guards Against                             |
 | ------------------------ | ----------- | ------------------------------------------ |
-| `max_depth`              | 128         | Stack overflow from deep nesting           |
+| `max_depth`              | 128         | Stack overflow from deep nesting (clamped — see below) |
 | `max_alias_expansions`   | 1,024       | Runaway alias *occurrence* counts          |
 | `max_total_alias_nodes`  | 100,000     | Billion-laughs alias amplification         |
 | `max_document_size`      | 256 MiB     | Memory exhaustion from huge documents      |
@@ -191,13 +191,34 @@ This one is the safe ceiling every caller gets for free; the policy is opt-in
 policy set above the limit cannot raise the ceiling — a hardening knob must not be
 usable to weaken a default.
 
-### A caveat on raising `max_depth`
+### `max_depth` is clamped, and cannot be raised past the ceiling
 
-`max_depth` currently does more than bound resources: composition is recursive, so
-a document deep enough to pass a raised limit can overflow the stack and **abort**
-the process rather than returning an error. Raising it much past a few thousand,
-or using `ResourceLimits::unlimited()` on deep input, is not safe today. Tracked
-in [#33](https://github.com/elioseverojunior/glaucus/issues/33).
+Composition is recursive — one stack frame per nesting level — so `max_depth` is
+not a pure resource knob. Set high enough it stops bounding memory and starts
+deciding whether the process survives, and a stack overflow **aborts**: it cannot
+be caught, so a library consumer loses their process instead of getting an error.
+
+The effective limit is therefore `min(max_depth, MAX_SAFE_DEPTH)`, where
+`MAX_SAFE_DEPTH` is **192**. Raising `max_depth` above it, or calling
+`ResourceLimits::unlimited()`, yields a clean `DepthLimitExceeded` rather than an
+abort. The default of 128 sits inside the ceiling, so ordinary use is unaffected.
+
+The constant is small because the measurement has a 24x spread — stack frame size
+scales with optimisation level:
+
+| build | stack | overflows at |
+| ----- | ----- | ------------ |
+| `opt-level = 1` | 8 MiB (main thread) | ~7,300 |
+| `opt-level = 1` | 2 MiB (spawned thread) | ~1,850 |
+| **`opt-level = 0`** | **2 MiB (spawned thread)** | **~300** |
+
+The last row is the one that binds: a consumer building glaucus inside their own
+debug profile, on a runtime whose workers get Rust's default 2 MiB thread stack.
+192 keeps roughly a 1.5x margin against it, checked by a compile-time assertion so
+the constant cannot be raised without re-measuring.
+
+Making composition iterative would remove the ceiling entirely; that is tracked
+separately in [#33](https://github.com/elioseverojunior/glaucus/issues/33).
 
 ## Safety
 

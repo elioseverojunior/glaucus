@@ -18,6 +18,58 @@
 //! assert_eq!(limits.max_depth, 128);
 //! ```
 
+/// The deepest nesting composition can survive, whatever `max_depth` says.
+///
+/// Composition is recursive: one stack frame per nesting level. `max_depth` is
+/// therefore not a pure resource knob — set high enough, it stops bounding memory
+/// and starts deciding whether the process survives at all. A stack overflow
+/// **aborts**; it cannot be caught, so a library consumer loses their process
+/// rather than receiving an error.
+///
+/// This ceiling exists so that cannot happen. The effective limit is
+/// `min(max_depth, MAX_SAFE_DEPTH)` — see
+/// [`effective_max_depth`](ResourceLimits::effective_max_depth) — so raising
+/// `max_depth`, or using [`unlimited`](ResourceLimits::unlimited), yields a clean
+/// [`DepthLimitExceeded`](crate::error::ErrorKind::DepthLimitExceeded) rather
+/// than an abort.
+///
+/// # Why 192
+///
+/// Measured, not guessed — and the measurement has a 24x spread, which is the
+/// whole reason this number is small:
+///
+/// | build | stack | overflows at |
+/// | ----- | ----- | ------------ |
+/// | `opt-level = 1` | 8 MiB (main thread) | ~7,300 |
+/// | `opt-level = 1` | 2 MiB (spawned thread) | ~1,850 |
+/// | **`opt-level = 0`** | **2 MiB (spawned thread)** | **~300** |
+///
+/// Stack frame size scales with optimisation level, so "how deep can we recurse"
+/// is not one number. A ceiling sized against the roomy case is not a ceiling.
+///
+/// The binding case is not hypothetical: a consumer building glaucus inside their
+/// own debug profile, on a runtime whose workers get Rust's default 2 MiB thread
+/// stack, lands exactly there. 192 keeps roughly a 1.5x margin against it.
+///
+/// The default `max_depth` of 128 sits comfortably inside this, so ordinary use
+/// is unaffected; documents nested past 192 are pathological rather than merely
+/// large.
+pub const MAX_SAFE_DEPTH: usize = 192;
+
+/// The shallowest overflow measured across realistic builds: `opt-level = 0` on
+/// the 2 MiB stack Rust gives a spawned thread. Recorded as a constant so the
+/// margin below is checked by the compiler rather than trusted.
+const WORST_MEASURED_OVERFLOW_DEPTH: usize = 300;
+
+// Compile-time, not a test: raising `MAX_SAFE_DEPTH` without re-measuring should
+// fail the BUILD, not wait for someone to run the suite -- the failure mode it
+// guards against is an uncatchable abort in a consumer's process.
+const _: () = assert!(
+    MAX_SAFE_DEPTH * 3 / 2 <= WORST_MEASURED_OVERFLOW_DEPTH,
+    "MAX_SAFE_DEPTH leaves under a 1.5x margin against the worst measured \
+     overflow depth; re-measure on a 2 MiB stack at opt-level 0 before raising it"
+);
+
 /// Configurable resource limits for YAML processing.
 ///
 /// These limits protect against known attack vectors:
@@ -104,7 +156,25 @@ impl Default for ResourceLimits {
 }
 
 impl ResourceLimits {
+    /// The nesting depth actually enforced: `min(max_depth, MAX_SAFE_DEPTH)`.
+    ///
+    /// [`max_depth`](Self::max_depth) is what the caller asked for;
+    /// this is what can be delivered without risking a stack overflow during
+    /// composition. See [`MAX_SAFE_DEPTH`] for why the two differ.
+    #[must_use]
+    pub const fn effective_max_depth(&self) -> usize {
+        if self.max_depth < MAX_SAFE_DEPTH {
+            self.max_depth
+        } else {
+            MAX_SAFE_DEPTH
+        }
+    }
+
     /// Creates limits with no restrictions. Use with caution — only for trusted inputs.
+    ///
+    /// Nesting depth is the one exception and cannot be uncapped: it is still
+    /// clamped to [`MAX_SAFE_DEPTH`], because exceeding it aborts the process
+    /// rather than returning an error. "Trusted" input can still be deep.
     pub const fn unlimited() -> Self {
         Self {
             max_depth: usize::MAX,
@@ -142,10 +212,50 @@ mod tests {
     fn unlimited_is_unrestricted() {
         let limits = ResourceLimits::unlimited();
         assert_eq!(limits.max_depth, usize::MAX);
+        assert_eq!(
+            limits.effective_max_depth(),
+            MAX_SAFE_DEPTH,
+            "unlimited() must not uncap depth: exceeding it aborts, it does not error"
+        );
         assert_eq!(limits.max_alias_expansions, usize::MAX);
         assert_eq!(limits.max_total_alias_nodes, usize::MAX);
         assert_eq!(limits.max_anchors, usize::MAX);
         assert_eq!(limits.max_anchor_name_length, usize::MAX);
         assert_eq!(limits.max_scalar_length, usize::MAX);
+    }
+}
+
+#[cfg(test)]
+mod safe_depth_tests {
+    use super::{MAX_SAFE_DEPTH, ResourceLimits};
+
+    #[test]
+    fn effective_depth_is_the_lower_of_the_two() {
+        let mut l = ResourceLimits::default();
+        assert_eq!(l.effective_max_depth(), 128, "default is below the ceiling");
+
+        l.max_depth = 10;
+        assert_eq!(l.effective_max_depth(), 10);
+
+        l.max_depth = MAX_SAFE_DEPTH;
+        assert_eq!(l.effective_max_depth(), MAX_SAFE_DEPTH);
+
+        l.max_depth = MAX_SAFE_DEPTH + 1;
+        assert_eq!(
+            l.effective_max_depth(),
+            MAX_SAFE_DEPTH,
+            "raising max_depth past the ceiling must not raise the ceiling"
+        );
+
+        l.max_depth = usize::MAX;
+        assert_eq!(l.effective_max_depth(), MAX_SAFE_DEPTH);
+    }
+
+    #[test]
+    fn ceiling_is_above_the_default_so_ordinary_use_is_unaffected() {
+        assert!(
+            ResourceLimits::default().max_depth < MAX_SAFE_DEPTH,
+            "the ceiling must not constrain the default configuration"
+        );
     }
 }

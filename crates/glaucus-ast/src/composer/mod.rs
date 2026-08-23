@@ -1326,6 +1326,91 @@ mod tests {
         );
     }
 
+    /// Composes `input` on a thread with a deliberately small stack.
+    ///
+    /// 2 MiB is what Rust gives a spawned thread, and it is the smallest budget a
+    /// real caller hits — the main thread's 8 MiB hides this class of bug. Before
+    /// the depth ceiling, composition overflowed at roughly 1,850 levels here and
+    /// **aborted**: not a failed test, a dead process.
+    fn compose_on_small_stack(input: String, config: ParserConfig) -> Vec<String> {
+        std::thread::Builder::new()
+            .stack_size(2 * 1024 * 1024)
+            .spawn(move || {
+                Composer::with_config(&input, config)
+                    .map(|r| match r {
+                        Ok(_) => "ok".to_owned(),
+                        Err(e) => format!("{:?}", e.kind),
+                    })
+                    .collect()
+            })
+            .expect("spawn")
+            .join()
+            .expect("the composer must return a Result, never abort the process")
+    }
+
+    #[test]
+    fn deep_nesting_errors_instead_of_aborting() {
+        // `unlimited()` is public API and sets `max_depth = usize::MAX`. Its docs
+        // say "trusted inputs" — but trusted input can still be deep, and an
+        // abort cannot be caught, so the caller loses their process rather than
+        // getting an error they could handle.
+        let depth = 10_000;
+        let src = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        let config = ParserConfig {
+            limits: ResourceLimits::unlimited(),
+            ..Default::default()
+        };
+
+        let results = compose_on_small_stack(src, config);
+        assert!(
+            results.iter().any(|r| r.starts_with("DepthLimitExceeded")),
+            "expected a clean depth error, got {results:?}"
+        );
+    }
+
+    #[test]
+    fn raising_max_depth_past_the_ceiling_does_not_raise_it() {
+        let depth = 5_000;
+        let src = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        let config = ParserConfig {
+            limits: ResourceLimits {
+                max_depth: 50_000,
+                max_node_count: usize::MAX,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let results = compose_on_small_stack(src, config);
+        assert!(
+            results.iter().any(|r| r.starts_with("DepthLimitExceeded")),
+            "a max_depth above MAX_SAFE_DEPTH must not be honoured, got {results:?}"
+        );
+    }
+
+    #[test]
+    fn depth_within_the_ceiling_still_composes() {
+        // The ceiling must not break legitimately nested documents. 150 is above
+        // the default of 128 and still inside MAX_SAFE_DEPTH (192), so it proves
+        // the clamp only bites past the ceiling rather than lowering it.
+        let depth = 150;
+        let src = format!("{}{}", "[".repeat(depth), "]".repeat(depth));
+        let config = ParserConfig {
+            limits: ResourceLimits {
+                max_depth: 190,
+                max_node_count: usize::MAX,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let results = compose_on_small_stack(src, config);
+        assert!(
+            results.iter().all(|r| r == "ok"),
+            "a 512-deep document must still compose, got {results:?}"
+        );
+    }
+
     // ─── Error handling ─────────────────────────────────────────────
 
     #[test]

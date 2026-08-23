@@ -248,7 +248,12 @@ impl<'a> Parser<'a> {
     /// The caller's continuation state must already be on the `states` stack.
     const fn enter_collection(&mut self, state: State, span: Span) -> Result<()> {
         self.depth += 1;
-        if self.depth > self.config.limits.max_depth {
+        // The EFFECTIVE limit, not the requested one. Composition is recursive --
+        // one stack frame per level -- so a `max_depth` above
+        // `limits::MAX_SAFE_DEPTH` would stop bounding memory and start deciding
+        // whether the process survives. Clamping here turns what was an
+        // uncatchable abort into an ordinary `DepthLimitExceeded`. See #33.
+        if self.depth > self.config.limits.effective_max_depth() {
             return Err(Error::depth_exceeded(&self.config.limits, span));
         }
         self.state = state;
