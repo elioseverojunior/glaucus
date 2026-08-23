@@ -148,13 +148,17 @@ Installing both is redundant — they produce the same `glaucus` binary. Run
 - **`#![forbid(unsafe_code)]`** on the core crate — no exceptions
 - **Built-in resource limits** protect against adversarial inputs out of the box:
 
-| Protection                        | Default Limit |
-| --------------------------------- | ------------- |
-| Nesting depth (stack overflow)    | 128 levels    |
-| Alias expansions (billion laughs) | 1,024         |
-| Document size (memory exhaustion) | 256 MiB       |
-| Key length                        | 1,024 bytes   |
-| Node count (CPU exhaustion)       | 1,000,000     |
+| Protection                             | Default Limit |
+| -------------------------------------- | ------------- |
+| Nesting depth (stack overflow)         | 128 levels    |
+| Alias occurrences                      | 1,024         |
+| Alias materialisation (billion laughs) | 100,000 nodes |
+| Document size (memory exhaustion)      | 256 MiB       |
+| Scalar length (memory exhaustion)      | 10 MiB        |
+| Key length                             | 1,024 bytes   |
+| Anchor count                           | 1,024         |
+| Anchor name length                     | 1,024 bytes   |
+| Node count (CPU exhaustion)            | 1,000,000     |
 
 - **Strict mode by default** — duplicate keys are errors, not silent overwrites
 

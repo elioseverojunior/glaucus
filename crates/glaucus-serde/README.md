@@ -134,6 +134,46 @@ Two companions specialize the bridge:
   `serde::ser::Error`. `Error::as_core()` recovers the underlying core error
   when present.
 
+## Scalar Resolution
+
+How a plain scalar becomes a typed value, in the order the deserialiser decides:
+
+1. **An explicit core-schema tag wins over everything**, including the scalar's
+   presentation style. `!!str 123` stays the string `"123"`, and `!!int "456"`
+   becomes the integer `456` even though quoting would otherwise force a string —
+   overriding implicit resolution is the entire purpose of writing the tag.
+   `!!str`, `!!int`, `!!float`, `!!bool`, `!!null` and `!!binary` are recognised;
+   `!!binary` is base64-decoded. Any other tag — `!!timestamp`, `!!seq`, or an
+   application tag such as `!mytag` — falls through to implicit resolution
+   unchanged.
+
+   Content that cannot satisfy its tag is an **error**, not a coercion: a tag is
+   an assertion about the data, so `!!int "abc"` is a defect in the document.
+   Under YAML 1.2 that also makes `!!bool "yes"` and `!!null "anything"` errors,
+   since neither value is in the 1.2 production for its tag.
+
+2. **Quoted scalars are strings.** No resolution is attempted.
+
+3. **Implicit resolution** for plain scalars: null, bool, integer, float, then a
+   string fallback.
+
+Two properties worth knowing:
+
+- **Bare `inf` / `nan` / `infinity` are strings**, not floats. YAML 1.2 §10.2
+  requires the leading dot — only `.inf`, `+.inf`, `-.inf` and `.nan` are floats.
+  (Rust's `f64::from_str` accepts the bare words, which is a trap this crate
+  guards against explicitly.)
+- **`yes` / `no` / `on` / `off` are strings** under the default YAML 1.2 schema —
+  the "Norway problem" does not apply here. They resolve as booleans only when
+  YAML 1.1 semantics are in force, which happens either because the caller set
+  `ParserConfig::yaml_1_1` or because the document itself declares `%YAML 1.1`.
+  The directive is document-scoped and does not carry across a `---` boundary.
+
+Empty, whitespace-only and comment-only input deserialises as a **null document**
+rather than an error, matching the rest of the ecosystem. Multi-document entry
+points still report zero documents for the same input, which is the honest answer
+for a stream.
+
 This crate sets `#![forbid(unsafe_code)]` — no exceptions.
 
 ## Usage

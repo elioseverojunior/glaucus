@@ -45,13 +45,21 @@ use glaucus_core::limits::ResourceLimits;
 
 let config = ParserConfig {
     limits: ResourceLimits {
-        max_depth: 512,           // default: 128
-        max_node_count: 10_000_000, // default: 1_000_000
+        max_depth: 512,                 // default: 128 -- see the caveat below
+        max_node_count: 10_000_000,     // default: 1_000_000
+        max_total_alias_nodes: 500_000, // default: 100_000
+        max_scalar_length: 64 << 20,    // default: 10 MiB
         ..ResourceLimits::default()
     },
     ..ParserConfig::default()
 };
 ```
+
+> **Raising `max_depth` is not currently safe past a few thousand.** Composition
+> is recursive, so a document deep enough to pass a raised limit can overflow the
+> stack and **abort** the process rather than returning an error. The same applies
+> to `ResourceLimits::unlimited()` on deep input. Tracked in
+> [#33](https://github.com/elioseverojunior/glaucus/issues/33).
 
 ### Block scalar content is wrong
 
@@ -71,7 +79,11 @@ let config = ParserConfig {
 
 1. Anchors are per-document — they reset at `---` boundaries.
 2. Forward references are not supported (anchor must appear before alias).
-3. Alias expansion count is limited by `max_alias_expansions` (default: 1,024).
+3. Two separate alias limits apply, and they count different things:
+   `max_alias_expansions` (default: 1,024) counts how many times an alias
+   *appears*, while `max_total_alias_nodes` (default: 100,000) counts the nodes
+   those appearances actually *materialise*. A billion-laughs document keeps the
+   first tiny while inflating the second, so it is the second that rejects it.
 
 ## Wrong Output
 

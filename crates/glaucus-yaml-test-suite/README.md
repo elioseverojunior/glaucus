@@ -45,7 +45,13 @@ cargo test -p glaucus-yaml-test-suite
 
 The integration test (`tests/yaml_test_suite.rs`) loads every case, runs it
 through Glaucus, prints a results table (total / passed / failed / skipped / rate)
-plus a failure breakdown, and asserts a minimum pass rate.
+plus a failure breakdown, and asserts a **100% pass rate**.
+
+The floor is 100 rather than a progress marker: conformance is 735/735, so any
+lower threshold would let a regression report green. A missing `data/` submodule
+likewise **fails** rather than skipping — a gate that can opt out of running is
+not a gate. Set `GLAUCUS_ALLOW_MISSING_TEST_SUITE=1` to skip deliberately when
+working without the submodule; CI never sets it.
 
 ## How It Works
 

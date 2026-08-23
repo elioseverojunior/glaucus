@@ -100,7 +100,7 @@ stays in one place.
 | `Error` / `ErrorKind`               | Unified pipeline error with span and contextual frames; `Result<T>` alias provided.   |
 | `ResourceLimits`                    | Hard limits guarding against adversarial inputs (see below).                          |
 | `ParserConfig`                      | Limits + `Strictness` + `SchemaKind` + policies + `merge_keys`/`yaml_1_1` toggles.    |
-| `ParserPolicies`                    | Opt-in hardening: `deny_anchors`, `deny_tags`, `max_scalar_length`.                   |
+| `ParserPolicies`                    | Opt-in hardening: `deny_anchors`, `deny_tags`, `max_scalar_length` (tightening only). |
 | `Strictness` / `SchemaKind`         | `Strict`/`Lenient` error handling; `Failsafe`/`Json`/`Core` tag resolution.           |
 
 ## Usage
@@ -155,16 +155,49 @@ assert!(event_count > 0);
 box. Callers must opt in to raise them (or use `ResourceLimits::unlimited()` for
 trusted input only).
 
-| Field                  | Default        | Guards Against                          |
-| ---------------------- | -------------- | --------------------------------------- |
-| `max_depth`            | 128            | Stack overflow from deep nesting        |
-| `max_alias_expansions` | 1,024          | Billion-laughs alias bombs              |
-| `max_document_size`    | 256 MiB        | Memory exhaustion from huge documents   |
-| `max_key_length`       | 1,024 bytes    | Memory exhaustion from oversized keys   |
-| `max_node_count`       | 1,000,000      | CPU exhaustion from node floods         |
+| Field                    | Default     | Guards Against                             |
+| ------------------------ | ----------- | ------------------------------------------ |
+| `max_depth`              | 128         | Stack overflow from deep nesting           |
+| `max_alias_expansions`   | 1,024       | Runaway alias *occurrence* counts          |
+| `max_total_alias_nodes`  | 100,000     | Billion-laughs alias amplification         |
+| `max_document_size`      | 256 MiB     | Memory exhaustion from huge documents      |
+| `max_scalar_length`      | 10 MiB      | Memory exhaustion from one oversized scalar |
+| `max_key_length`         | 1,024 bytes | Memory exhaustion from oversized keys      |
+| `max_anchors`            | 1,024       | Memory exhaustion from anchor floods       |
+| `max_anchor_name_length` | 1,024 bytes | Memory exhaustion from huge anchor names   |
+| `max_node_count`         | 1,000,000   | CPU exhaustion from node floods            |
 
 Limit violations surface as `ErrorKind::*LimitExceeded` variants;
 `Error::is_limit_error()` distinguishes them from syntax errors.
+
+### Two alias limits, because they count different things
+
+`max_alias_expansions` counts how many times an alias *appears* in the source, and
+`max_node_count` counts parser *events* — both measure the source document. An
+alias resolves by cloning the anchored subtree, so a document whose event count is
+trivially small can still materialise an arbitrarily large tree, and neither
+counter can observe that growth because the cloned nodes were never parsed.
+
+`max_total_alias_nodes` counts the other quantity: nodes actually conjured by
+alias expansion. It is the one that bounds billion-laughs amplification, and it is
+charged **before** each clone is committed — charging afterwards would still "have
+a check" while letting one unbounded allocation through.
+
+### `max_scalar_length` and the policy of the same name
+
+`ParserPolicies::max_scalar_length` also exists, and the two are not redundant.
+This one is the safe ceiling every caller gets for free; the policy is opt-in
+*further tightening*. The effective bound is the **smaller** of the two, so a
+policy set above the limit cannot raise the ceiling — a hardening knob must not be
+usable to weaken a default.
+
+### A caveat on raising `max_depth`
+
+`max_depth` currently does more than bound resources: composition is recursive, so
+a document deep enough to pass a raised limit can overflow the stack and **abort**
+the process rather than returning an error. Raising it much past a few thousand,
+or using `ResourceLimits::unlimited()` on deep input, is not safe today. Tracked
+in [#33](https://github.com/elioseverojunior/glaucus/issues/33).
 
 ## Safety
 

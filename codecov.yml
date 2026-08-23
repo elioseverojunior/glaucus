@@ -93,7 +93,7 @@ flags:
 ignore:
   - "crates/*/src/main.rs"                  # CLI entry points (argv/stdin/exit)
   - "crates/glaucus-wasm/src/lib.rs"          # wasm-bindgen ABI glue
-  - "crates/glaucus-fuzz/**"                  # own workspace; not a coverage target
+  - "crates/glaucus-fuzz/**"                  # bins are test=false; not a coverage target
   - "crates/glaucus-yaml-test-suite/data/**"  # vendored YAML conformance corpus
 
 comment:

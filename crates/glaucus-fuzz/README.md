@@ -123,11 +123,11 @@ Any crash-reproducing input is written to `artifacts/<target>/` so it can be rep
 cargo +nightly fuzz run <TARGET> artifacts/<TARGET>/<crash-file>
 ```
 
-## Why Not a Workspace Member
+## How This Crate Relates to the Workspace
 
-cargo-fuzz builds its targets with sanitizer instrumentation and its own profile settings, which it controls via the fuzz crate's *own* `[workspace]` root. If `glaucus-fuzz` were a member of the main workspace, those settings would either conflict with the library build or fail to apply. The conventional fix — and what Glaucus does — is:
+`glaucus-fuzz` **is** a member of the main workspace — the root manifest says `members = ["crates/*"]` and does not exclude it. What isolates it is narrower than exclusion, and the distinction matters in practice:
 
-1. `glaucus-fuzz/Cargo.toml` declares an empty `[workspace]` table, making it a standalone workspace root.
-2. The repository's virtual root manifest lists `exclude = ["crates/glaucus-fuzz"]`.
+- Every `[[bin]]` sets `test = false` and `doc = false`, so `cargo test --workspace` runs no tests from this crate and the tarpaulin gate collects nothing from it. `codecov.yml` also excludes `crates/glaucus-fuzz/**` from reporting.
+- Actual fuzzing runs through `cargo +nightly fuzz`, which supplies the sanitizer instrumentation and profile settings libFuzzer needs. Those never apply to an ordinary `cargo build`.
 
-As a result `cargo build --workspace`, `cargo test --workspace`, and the coverage gate never touch this crate; it is driven exclusively through `cargo +nightly fuzz`.
+**But `cargo build --workspace` and `cargo clippy --workspace --all-targets` DO compile these targets.** That is the part worth remembering: a change to a shared type has to be reflected here or the workspace build breaks. Adding a field to `ResourceLimits` is the usual way to discover this, since the targets construct it with exhaustive struct literals — deliberately, so that a new limit cannot be added without someone deciding whether the fuzzers should exercise it.
