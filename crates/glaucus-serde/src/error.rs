@@ -18,6 +18,16 @@ pub struct Error {
 enum ErrorInner {
     /// Error from glaucus-core (parsing, composing).
     Core(glaucus_core::error::Error),
+    /// Failure reading the input, kept as the original `io::Error`.
+    ///
+    /// Held as a typed error rather than a message so a caller can still tell
+    /// `NotFound` from `PermissionDenied` from a malformed document. Flattening
+    /// it into prose makes those three indistinguishable, and "the file is
+    /// missing" and "the YAML is wrong" want different handling.
+    ///
+    /// This lives here rather than in `glaucus_core::ErrorKind` because that enum
+    /// derives `Clone` and `PartialEq`, and `std::io::Error` is neither.
+    Io(std::io::Error),
     /// Custom message from serde (e.g. "missing field `name`").
     Custom(String),
 }
@@ -31,12 +41,32 @@ impl Error {
         }
     }
 
+    /// Creates an error from a failure to read the input.
+    #[must_use]
+    pub const fn io(err: std::io::Error) -> Self {
+        Self {
+            inner: ErrorInner::Io(err),
+        }
+    }
+
     /// Returns the underlying glaucus-core error, if this is a core error.
     #[must_use]
     pub const fn as_core(&self) -> Option<&glaucus_core::error::Error> {
         match &self.inner {
             ErrorInner::Core(e) => Some(e),
-            ErrorInner::Custom(_) => None,
+            ErrorInner::Io(_) | ErrorInner::Custom(_) => None,
+        }
+    }
+
+    /// Returns the underlying I/O error, if the input could not be read.
+    ///
+    /// Prefer this to matching on the message: it is the difference between
+    /// retrying a transient read and reporting a malformed document.
+    #[must_use]
+    pub const fn as_io(&self) -> Option<&std::io::Error> {
+        match &self.inner {
+            ErrorInner::Io(e) => Some(e),
+            ErrorInner::Core(_) | ErrorInner::Custom(_) => None,
         }
     }
 }
@@ -45,6 +75,7 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.inner {
             ErrorInner::Core(e) => write!(f, "{e}"),
+            ErrorInner::Io(e) => write!(f, "failed to read input: {e}"),
             ErrorInner::Custom(msg) => f.write_str(msg),
         }
     }
@@ -54,6 +85,9 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.inner {
             ErrorInner::Core(e) => Some(e),
+            ErrorInner::Io(e) => Some(e),
+            // A serde-origin message ("missing field `name`") has nothing beneath
+            // it. Inventing a source would be worse than reporting none.
             ErrorInner::Custom(_) => None,
         }
     }

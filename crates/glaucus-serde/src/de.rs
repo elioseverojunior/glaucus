@@ -837,14 +837,10 @@ pub fn from_reader<T: DeserializeOwned + 'static>(
     mut reader: impl std::io::Read,
 ) -> crate::error::Result<T> {
     let mut buf = String::new();
-    reader.read_to_string(&mut buf).map_err(|e| {
-        Error::core(glaucus_core::error::Error::spanless(
-            glaucus_core::error::ErrorKind::UnexpectedToken {
-                expected: "readable input".into(),
-                found: format!("I/O error: {e}").into(),
-            },
-        ))
-    })?;
+    // Keep the `io::Error` itself rather than rendering it into an
+    // `UnexpectedToken` message: a caller needs to tell a missing file from a
+    // permissions failure from malformed YAML, and prose erases that.
+    reader.read_to_string(&mut buf).map_err(Error::io)?;
     from_str(&buf)
 }
 
@@ -899,14 +895,10 @@ pub fn from_reader_with<T: DeserializeOwned + 'static>(
     config: glaucus_core::error::ParserConfig,
 ) -> crate::error::Result<T> {
     let mut buf = String::new();
-    reader.read_to_string(&mut buf).map_err(|e| {
-        Error::core(glaucus_core::error::Error::spanless(
-            glaucus_core::error::ErrorKind::UnexpectedToken {
-                expected: "readable input".into(),
-                found: format!("I/O error: {e}").into(),
-            },
-        ))
-    })?;
+    // Keep the `io::Error` itself rather than rendering it into an
+    // `UnexpectedToken` message: a caller needs to tell a missing file from a
+    // permissions failure from malformed YAML, and prose erases that.
+    reader.read_to_string(&mut buf).map_err(Error::io)?;
     from_str_with(&buf, config)
 }
 
@@ -980,6 +972,77 @@ mod tests {
     fn de_string() {
         let result: String = from_str("hello").unwrap();
         assert_eq!(result, "hello");
+    }
+
+    // ─── Error source chains ────────────────────────────────────────
+
+    /// A reader that always fails, so the I/O path can be exercised.
+    struct FailingReader(std::io::ErrorKind);
+
+    impl std::io::Read for FailingReader {
+        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(self.0, "synthetic failure"))
+        }
+    }
+
+    #[test]
+    fn reader_io_failure_is_preserved_as_a_typed_source() {
+        // An I/O failure must stay an `io::Error`, not become prose. A caller
+        // needs to tell "file not found" from "permission denied" from "the YAML
+        // is malformed", and flattening the error into a message string makes all
+        // three indistinguishable.
+        use std::error::Error as _;
+
+        for kind in [
+            std::io::ErrorKind::PermissionDenied,
+            std::io::ErrorKind::NotFound,
+            std::io::ErrorKind::UnexpectedEof,
+        ] {
+            let err = from_reader::<crate::value::Value>(FailingReader(kind))
+                .expect_err("a failing reader must produce an error");
+
+            let source = err
+                .source()
+                .expect("an I/O failure must expose the io::Error as its source");
+            let io = source
+                .downcast_ref::<std::io::Error>()
+                .expect("the source must downcast to io::Error");
+
+            assert_eq!(io.kind(), kind, "the io::ErrorKind must survive");
+        }
+    }
+
+    #[test]
+    fn parse_errors_still_chain_to_the_core_error() {
+        // The existing chain must not regress: a parse failure exposes the
+        // glaucus-core error, and `as_core` keeps working.
+        use std::error::Error as _;
+
+        let err = from_str::<crate::value::Value>("[unclosed").expect_err("must fail");
+        assert!(err.as_core().is_some(), "as_core must still resolve");
+        assert!(
+            err.source()
+                .and_then(|s| s.downcast_ref::<glaucus_core::error::Error>())
+                .is_some(),
+            "a parse error must chain to the core error"
+        );
+    }
+
+    #[test]
+    fn serde_custom_errors_have_no_source() {
+        // "missing field `x`" originates in serde, not below us. Inventing a
+        // source for it would be worse than reporting none.
+        use std::error::Error as _;
+
+        #[derive(Deserialize, Debug)]
+        struct Needs {
+            #[allow(dead_code)]
+            required: String,
+        }
+
+        let err = from_str::<Needs>("other: 1").expect_err("must fail");
+        assert!(err.as_core().is_none());
+        assert!(err.source().is_none(), "a serde-origin error has no source");
     }
 
     // ─── Core-schema tag resolution ─────────────────────────────────
