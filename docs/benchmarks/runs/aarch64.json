@@ -1,0 +1,57 @@
+{
+  "quality": "ok",
+  "busy": 0.285,
+  "cores": 8,
+  "arch": "arm64",
+  "platform": "macOS-26.6.2-arm64-arm-64bit-Mach-O",
+  "rows": [
+    {
+      "case": "streaming_vs_tree/generic/large",
+      "stat": "slope",
+      "candidate_ns": 6720240.113991429,
+      "baseline_ns": 7184074.712528447,
+      "speedup": 1.0690205395446097,
+      "significant": "faster"
+    },
+    {
+      "case": "streaming_vs_tree/generic/medium",
+      "stat": "slope",
+      "candidate_ns": 127054.50902558431,
+      "baseline_ns": 131895.51296527265,
+      "speedup": 1.0381017877823882,
+      "significant": "faster"
+    },
+    {
+      "case": "streaming_vs_tree/generic/small",
+      "stat": "slope",
+      "candidate_ns": 12438.977651981902,
+      "baseline_ns": 12823.033279445319,
+      "speedup": 1.030875176257128,
+      "significant": "faster"
+    },
+    {
+      "case": "streaming_vs_tree/partial/large",
+      "stat": "slope",
+      "candidate_ns": 2060096.3571528497,
+      "baseline_ns": 2351025.3535495787,
+      "speedup": 1.1412210624937984,
+      "significant": "faster"
+    },
+    {
+      "case": "streaming_vs_tree/partial/medium",
+      "stat": "slope",
+      "candidate_ns": 45211.61502953186,
+      "baseline_ns": 48137.686520196345,
+      "speedup": 1.0647194639862612,
+      "significant": "faster"
+    },
+    {
+      "case": "streaming_vs_tree/partial/small",
+      "stat": "slope",
+      "candidate_ns": 4934.196168011336,
+      "baseline_ns": 5104.59553415709,
+      "speedup": 1.0345343720321583,
+      "significant": "faster"
+    }
+  ]
+}

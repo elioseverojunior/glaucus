@@ -2,16 +2,14 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineLoader } from "vitepress";
 
-// Build-time loader, matching `results.data.ts`: `watch` hot-reloads the page
-// when a new run is dropped in, and pins the dependency so the production build
-// cannot serve a stale table.
-const DATA = fileURLToPath(
-  new URL("./streaming-vs-tree.json", import.meta.url),
-);
+// One file per host. Globbed rather than named, so recording another machine is
+// dropping a file in — and so a reader sees every host the decision rests on
+// rather than whichever one happened to be written last.
+const DIR = fileURLToPath(new URL("./runs", import.meta.url));
 
 interface Row {
   case: string;
@@ -27,48 +25,75 @@ interface Row {
 }
 
 interface Raw {
-  quality: "ok" | "degraded";
+  quality: "ok" | "degraded" | "unverified";
   busy: number;
+  cores: number;
+  arch: string;
+  platform: string;
   rows: Row[];
 }
 
-export interface Data {
-  rows: Array<Row & { streaming_us: string; tree_us: string; ratio: string }>;
-  /** True only when medium AND large are significantly faster — the #58 rule. */
-  verdict: boolean;
-  quality: "ok" | "degraded";
+interface Run {
+  arch: string;
+  platform: string;
+  cores: number;
+  quality: string;
   busy: string;
+  rows: Array<Row & { streaming_us: string; tree_us: string; ratio: string }>;
+  /** True when medium AND large are significantly faster — the #58 rule. */
+  verdict: boolean;
+}
+
+export interface Data {
+  runs: Run[];
+  /** True only when EVERY recorded host meets the rule. */
+  verdict: boolean;
 }
 
 declare const data: Data;
 export { data };
 
+function format(raw: Raw): Run {
+  const decisive = (name: string) =>
+    raw.rows.some((r) => r.case.includes(name) && r.significant === "faster") &&
+    raw.rows
+      .filter((r) => r.case.includes(name))
+      .every((r) => r.significant === "faster");
+
+  return {
+    arch: raw.arch,
+    platform: raw.platform,
+    cores: raw.cores,
+    quality: raw.quality,
+    busy: `${(raw.busy * 100).toFixed(1)}%`,
+    rows: raw.rows.map((r) => ({
+      ...r,
+      streaming_us: (r.candidate_ns / 1000).toFixed(2),
+      tree_us: (r.baseline_ns / 1000).toFixed(2),
+      ratio: `${r.speedup.toFixed(2)}x`,
+    })),
+    verdict: decisive("medium") && decisive("large"),
+  };
+}
+
 export default defineLoader({
-  watch: [DATA],
+  watch: [`${DIR}/*.json`],
   load(): Data {
-    let raw: Raw;
+    let runs: Run[] = [];
     try {
-      raw = JSON.parse(readFileSync(DATA, "utf-8")) as Raw;
+      runs = readdirSync(DIR)
+        .filter((f) => f.endsWith(".json"))
+        .map((f) => format(JSON.parse(readFileSync(`${DIR}/${f}`, "utf-8")) as Raw));
     } catch {
       // No run recorded yet. An empty table is honest; a fabricated one is not.
-      return { rows: [], verdict: false, quality: "degraded", busy: "—" };
+      return { runs: [], verdict: false };
     }
-    const rows = raw.rows ?? [];
-
-    const decisive = (name: string) =>
-      rows.some((r) => r.case.includes(name) && r.significant === "faster");
 
     return {
-      rows: rows.map((r) => ({
-        ...r,
-        streaming_us: (r.candidate_ns / 1000).toFixed(2),
-        tree_us: (r.baseline_ns / 1000).toFixed(2),
-        ratio: `${r.speedup.toFixed(2)}x`,
-      })),
-      // #58's rule: medium AND large, on non-overlapping intervals.
-      verdict: decisive("medium") && decisive("large"),
-      quality: raw.quality,
-      busy: `${(raw.busy * 100).toFixed(0)}%`,
+      runs,
+      // Every host, not any host: a rule met on one architecture and missed on
+      // another has not been met.
+      verdict: runs.length > 0 && runs.every((r) => r.verdict),
     };
   },
 });

@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -190,15 +191,26 @@ def main() -> int:
         snapshot = json.loads(args.host.read_text())
         quality, busy = snapshot["quality"], snapshot["busy"]
         cores = snapshot.get("cores", os.cpu_count() or 1)
+        arch = snapshot.get("arch", "unknown")
+        host_platform = snapshot.get("platform", "unknown")
     else:
         cores = os.cpu_count() or 1
         busy = os.getloadavg()[0] / cores
         quality = "unverified"
+        arch = platform.machine()
+        host_platform = platform.platform()
     print()
-    print(f"host: {busy:.1%} busy over {cores} cores -> {quality}")
+    print(f"host: {arch}, {busy:.1%} busy over {cores} cores -> {quality}")
 
     if args.json:
-        payload = {"quality": quality, "busy": round(busy, 4), "rows": rows}
+        payload = {
+            "quality": quality,
+            "busy": round(busy, 4),
+            "cores": cores,
+            "arch": arch,
+            "platform": host_platform,
+            "rows": rows,
+        }
         args.json.write_text(json.dumps(payload, indent=2) + "\n")
     return 0
 

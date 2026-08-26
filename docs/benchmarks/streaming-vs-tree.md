@@ -28,7 +28,14 @@ That distinction is not pedantry. On 2026-08-01 a degraded host produced 77
 internally consistent measurements that were 4.6×–20.9× wrong in absolute terms;
 every arm was slow together, so nothing inside the data looked wrong.
 `mise run bench:compare` refuses to start on a host above 30% load per core for
-that reason.
+that reason, and snapshots the verdict *before* the run — sampling afterwards
+would describe a machine that has since gone quiet.
+
+`Statistic` names which estimate the comparison used. Criterion's headline figure
+is the **slope**, a regression over iteration counts, far less sensitive to the
+occasional long iteration. It is absent for slow benchmarks, where one iteration
+per sample leaves no line to fit, and the **mean** serves there instead. The two
+are never mixed within a pair.
 
 ## Cases
 
@@ -38,27 +45,46 @@ that reason.
   before the target discards most of them; streaming walks the events and drops
   what nothing asked for.
 
-<div v-if="!data.rows.length" class="warning custom-block">
+## The size of the win depends on the architecture
+
+Both hosts below agree on the verdict, and disagree on the margin — the `partial`
+shape gains 1.25×–1.35× on x86_64 but only 1.03×–1.14× on arm64.
+
+The tree path's cost is dominated by allocating a node graph and freeing it
+again, which is precisely what streaming skips. How expensive that is differs
+enough between allocators and memory subsystems to move the margin by more than
+2×. **Cite the architecture with the number**; a single figure quoted alone will
+be wrong somewhere.
+
+The ordering survives on both: `partial` gains more than `generic`, which is the
+claim that the skipping is what pays.
+
+<div v-if="!data.runs.length" class="warning custom-block">
   <p class="custom-block-title">No run recorded</p>
   <p>Run <code>mise run bench:compare</code> to populate this page.</p>
 </div>
 
-<div v-else-if="data.quality === 'degraded'" class="danger custom-block">
-  <p class="custom-block-title">⚠ Measured on a contaminated host ({{ data.busy }} busy) — do not cite</p>
+<div v-for="run in data.runs" :key="run.arch">
+
+### `{{ run.arch }}` — {{ run.cores }} cores
+
+<div v-if="run.quality !== 'ok'" class="danger custom-block">
+  <p class="custom-block-title">⚠ Measured on a contaminated host ({{ run.busy }} busy) — do not cite</p>
   <p>
     Noise widens confidence intervals, so a <code>faster</code> verdict here is
-    conservative. A <code>no</code> is <strong>inconclusive</strong>, not
-    evidence of a dead heat — and must not be read as grounds for deleting an
-    engine. Re-run on a quiet host.
+    conservative. A <code>no</code> is <strong>inconclusive</strong>, not evidence
+    of a dead heat — and must not be read as grounds for deleting an engine.
   </p>
 </div>
 
-<table v-if="data.rows.length">
+<p><code>{{ run.platform }}</code> — {{ run.busy }} busy at the gate</p>
+
+<table>
   <thead>
     <tr><th>Case</th><th>Streaming</th><th>Tree</th><th>Speedup</th><th>Statistic</th><th>Significant</th></tr>
   </thead>
   <tbody>
-    <tr v-for="row in data.rows" :key="row.case">
+    <tr v-for="row in run.rows" :key="row.case">
       <td><code>{{ row.case }}</code></td>
       <td>{{ row.streaming_us }} µs</td>
       <td>{{ row.tree_us }} µs</td>
@@ -69,16 +95,18 @@ that reason.
   </tbody>
 </table>
 
-<p v-if="data.rows.length">
-  <strong>Verdict:</strong>
-  <span v-if="data.verdict">medium and large are both significantly faster — the streaming path stays.</span>
-  <span v-else>the rule in #58 is not met on this run.</span>
-</p>
+</div>
 
-The `Statistic` column names which estimate the comparison used. Criterion's
-headline figure is the **slope** — a regression over iteration counts, far less
-sensitive to the occasional long iteration a busy host produces. It is absent
-for slow benchmarks, where one iteration per sample leaves no line to fit, and
-the **mean** serves there instead. The two are never mixed within a pair.
+<p v-if="data.runs.length">
+  <strong>Verdict:</strong>
+  <span v-if="data.verdict">
+    medium and large are significantly faster on every host recorded — the
+    streaming path stays.
+  </span>
+  <span v-else>
+    the rule in #58 is not met on at least one host. A rule met on one
+    architecture and missed on another has not been met.
+  </span>
+</p>
 
 [#57]: https://github.com/elioseverojunior/glaucus/issues/57

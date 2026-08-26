@@ -1,6 +1,9 @@
 {
   "quality": "ok",
-  "busy": 0.1678,
+  "busy": 0.168,
+  "cores": 20,
+  "arch": "x86_64",
+  "platform": "macOS-15.7.9-x86_64-i386-64bit-Mach-O",
   "rows": [
     {
       "case": "streaming_vs_tree/generic/large",

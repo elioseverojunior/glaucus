@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -64,7 +65,20 @@ def main() -> int:
         # machine that has since gone quiet and label a contaminated run clean --
         # which is the failure this whole gate exists to prevent.
         args.snapshot.write_text(
-            json.dumps({"quality": quality, "busy": round(busy, 4), "cores": cores}) + "\n"
+            json.dumps(
+                {
+                    "quality": quality,
+                    "busy": round(busy, 4),
+                    "cores": cores,
+                    # Recorded because the ANSWER depends on it: the tree path's
+                    # cost is dominated by building a node graph, and how cheap
+                    # that is differs enough between architectures to change the
+                    # size of the win by more than 2x.
+                    "arch": platform.machine(),
+                    "platform": platform.platform(),
+                }
+            )
+            + "\n"
         )
 
     if busy <= args.max_load:
