@@ -2017,6 +2017,36 @@ cargo criterion "${args[@]}"
 shell = "bash -c"
 usage = 'arg "[args]" var=#true help="cargo-criterion args, e.g. --bench <name>; runs all benches when omitted"'
 
+[tasks."bench:compare"]
+alias = ["bench:ab"]
+description = "A/B two deserialisation engines and report which wins, on confidence intervals rather than point estimates"
+run = '''
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+# Gate FIRST. A contaminated host produces internally consistent numbers that
+# are wrong in absolute terms -- 2026-08-01 produced 77 of them -- and no amount
+# of statistics downstream recovers from that. `--force` is for deliberately
+# taking an indicative reading, which must not be cited as a decision.
+snapshot="$(mktemp)"
+if [ "${usage_force:-false}" = "true" ]; then
+    scripts/bench-preflight.py --report --snapshot "$snapshot"
+    echo "bench:compare: running anyway (--force); results are INDICATIVE, not decision-grade" >&2
+else
+    scripts/bench-preflight.py --snapshot "$snapshot"
+fi
+
+cargo bench -p glaucus-bench --bench streaming_vs_tree
+scripts/bench-significance.py --baseline tree --candidate streaming \
+    --host "$snapshot" --json docs/benchmarks/streaming-vs-tree.json
+'''
+shell = "bash -c"
+usage = '''
+flag "--force" help="run even when the preflight gate says the host is contaminated"
+flag "-v --verbose" help="verbose output"
+'''
+
 [tasks.flame]
 alias = []
 description = "Profile a target with cargo-flamegraph → flamegraph.svg. macOS needs sudo/dtrace (SIP); pass a target, e.g. `mise run flame --bench parser`"

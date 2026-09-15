@@ -141,6 +141,7 @@ export default defineConfig({
         items: [
           { text: "Latest", link: "/benchmarks/latest" },
           { text: "Baseline", link: "/benchmarks/baseline" },
+          { text: "Streaming vs tree", link: "/benchmarks/streaming-vs-tree" },
         ],
       },
     ],

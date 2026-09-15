@@ -68,3 +68,7 @@ name = "serde"
 [[bench]]
 harness = false
 name = "end_to_end"
+
+[[bench]]
+harness = false
+name = "streaming_vs_tree"

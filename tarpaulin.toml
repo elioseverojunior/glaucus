@@ -46,4 +46,14 @@ exclude-files = [
   # library code driven through `run_with(Env)` and is covered by unit tests.
   "crates/glaucus/src/cli/process.rs",
   "crates/glaucus-wasm/src/lib.rs",
+  # Criterion targets set `harness = false`, so `cargo test` never runs them --
+  # there is no harness to run. Only `streaming_vs_tree.rs` ever showed up here,
+  # because it is the one bench with a GENERIC helper and monomorphisation emits
+  # a coverage map for it even though the binary is never executed; the others
+  # are invisible for the same reason they are untestable. Excluded as a
+  # directory so that stays true whichever bench gains a generic next.
+  #
+  # No production logic is hidden: glaucus-bench is a dev-only crate, and its
+  # `src/fixtures.rs` IS unit-tested and still counted.
+  "crates/glaucus-bench/benches/*.rs",
 ]

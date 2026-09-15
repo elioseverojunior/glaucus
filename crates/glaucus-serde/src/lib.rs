@@ -35,6 +35,7 @@ pub mod borrowed;
 pub mod de;
 pub mod error;
 pub mod ser;
+mod stream;
 // The streaming serializer drives the public `to_string`/`to_string_with` and
 // `to_writer`/`to_writer_with` paths (no intermediate `Node` tree).
 pub(crate) mod stream_ser;
