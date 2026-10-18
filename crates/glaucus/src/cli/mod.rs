@@ -178,7 +178,7 @@ pub(crate) mod tests {
     fn no_arguments_is_a_usage_error() {
         let (code, out, err) = drive(&["glaucus"], "");
         assert_eq!(code, exit::USAGE);
-        assert!(out.is_empty());
+        assert!(out.is_empty(), "expected empty, got {out:?}");
         assert!(err.contains("Usage:"));
     }
 
@@ -187,7 +187,7 @@ pub(crate) mod tests {
         let (code, out, err) = drive(&["glaucus", "--help"], "");
         assert_eq!(code, exit::OK);
         assert!(out.contains("Usage:"));
-        assert!(err.is_empty());
+        assert!(err.is_empty(), "expected empty, got {err:?}");
     }
 
     #[test]

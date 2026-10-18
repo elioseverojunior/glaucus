@@ -71,7 +71,11 @@ spec:
     assert_eq!(pod.spec.containers[0].name, "nginx");
     assert_eq!(pod.spec.containers[0].ports[0].container_port, 80);
     assert_eq!(pod.spec.containers[1].name, "sidecar");
-    assert!(pod.spec.containers[1].ports.is_empty());
+    assert!(
+        pod.spec.containers[1].ports.is_empty(),
+        "expected empty, got {:?}",
+        pod.spec.containers[1].ports
+    );
 
     // Round-trip
     let yaml_out = glaucus::to_string(&pod).unwrap();
@@ -351,7 +355,11 @@ fn empty_collections() {
         tags: std::collections::BTreeMap<String, String>,
     }
     let data: Data = glaucus::from_str("items: []\ntags: {}").unwrap();
-    assert!(data.items.is_empty());
+    assert!(
+        data.items.is_empty(),
+        "expected empty, got {:?}",
+        data.items
+    );
     assert!(data.tags.is_empty());
 
     let yaml = glaucus::to_string(&data).unwrap();
@@ -631,7 +639,7 @@ fn schema_validation_via_facade() {
         .unwrap()
         .into_owned();
     let errs = glaucus::schema::validate(&bad, &sc).unwrap_err();
-    assert!(!errs.is_empty());
+    assert!(!errs.is_empty(), "`errs` is empty");
     // each error carries a span
     assert!(
         errs.iter()

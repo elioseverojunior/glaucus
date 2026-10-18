@@ -865,8 +865,10 @@ mod query_tests {
     #[test]
     fn no_match_is_an_empty_vec_not_an_error() {
         let d = n("a: 1\n");
-        assert!(d.query("..zzz").is_empty());
-        assert!(d.query("zzz").is_empty());
+        let got = d.query("..zzz");
+        assert!(got.is_empty(), "expected empty, got {got:?}");
+        let got = d.query("zzz");
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]
@@ -901,6 +903,7 @@ mod query_tests {
     #[test]
     fn descent_on_a_scalar_root_finds_nothing_below_it() {
         let d = n("just-a-scalar\n");
-        assert!(d.query("..a").is_empty());
+        let got = d.query("..a");
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 }

@@ -245,7 +245,7 @@ mod tests {
             schema("type: object\nproperties:\n  port: {type: integer}\n  name: {type: string}\n");
         let mut doc = Document::parse("port: 8080\nname: \"alice\"\n");
         let changes = coerce_to_schema(&mut doc, &sc);
-        assert!(changes.is_empty());
+        assert!(changes.is_empty(), "expected empty, got {changes:?}");
         assert_eq!(doc.to_string(), "port: 8080\nname: \"alice\"\n");
     }
 
@@ -278,7 +278,8 @@ mod tests {
     fn apply_defaults_no_op_when_all_present() {
         let sc = schema("type: object\nproperties:\n  a: {default: 1}\n");
         let mut doc = Document::parse("a: 5\n");
-        assert!(apply_defaults(&mut doc, &sc).is_empty());
+        let got = apply_defaults(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "a: 5\n");
     }
 
@@ -325,7 +326,8 @@ mod tests {
     fn multi_type_leaves_non_numeric_string_alone() {
         let sc = schema("type: object\nproperties:\n  v: {type: [integer, string]}\n");
         let mut doc = Document::parse("v: hello\n");
-        assert!(coerce_to_schema(&mut doc, &sc).is_empty());
+        let got = coerce_to_schema(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "v: hello\n");
     }
 
@@ -361,7 +363,7 @@ mod tests {
         );
         let mut doc = Document::parse("name: x\n");
         let inserted = apply_defaults(&mut doc, &sc);
-        assert!(inserted.is_empty());
+        assert!(inserted.is_empty(), "expected empty, got {inserted:?}");
         assert_eq!(doc.to_string(), "name: x\n");
     }
 
@@ -379,7 +381,8 @@ mod tests {
         // return in the scalar-leaf branch.
         let sc = schema("type: integer\n");
         let mut doc = Document::parse("\"5\"\n");
-        assert!(coerce_to_schema(&mut doc, &sc).is_empty());
+        let got = coerce_to_schema(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "\"5\"\n");
     }
 
@@ -389,7 +392,8 @@ mod tests {
         // `schema.types` None early return).
         let sc = schema("type: object\nproperties:\n  v: {description: free}\n");
         let mut doc = Document::parse("v: \"7\"\n");
-        assert!(coerce_to_schema(&mut doc, &sc).is_empty());
+        let got = coerce_to_schema(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "v: \"7\"\n");
     }
 
@@ -418,7 +422,8 @@ mod tests {
         // A non-boolean value under `type: boolean` hits the `_ => None` arm.
         let sc = schema("type: object\nproperties:\n  flag: {type: boolean}\n");
         let mut doc = Document::parse("flag: maybe\n");
-        assert!(coerce_to_schema(&mut doc, &sc).is_empty());
+        let got = coerce_to_schema(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "flag: maybe\n");
     }
 
@@ -438,7 +443,8 @@ mod tests {
         // `doc.get(path)` is None → the scalar-leaf early return.
         let sc = schema("type: object\nproperties:\n  missing: {type: integer}\n");
         let mut doc = Document::parse("present: 1\n");
-        assert!(coerce_to_schema(&mut doc, &sc).is_empty());
+        let got = coerce_to_schema(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "present: 1\n");
     }
 
@@ -448,7 +454,8 @@ mod tests {
         // coerce_value. The value is left untouched.
         let sc = schema("type: object\nproperties:\n  v: {type: 'null'}\n");
         let mut doc = Document::parse("v: anything\n");
-        assert!(coerce_to_schema(&mut doc, &sc).is_empty());
+        let got = coerce_to_schema(&mut doc, &sc);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
         assert_eq!(doc.to_string(), "v: anything\n");
     }
 }

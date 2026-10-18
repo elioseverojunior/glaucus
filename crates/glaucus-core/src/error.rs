@@ -704,15 +704,22 @@ mod tests {
 
     #[test]
     fn policy_error_kinds_display() {
-        assert!(!ErrorKind::AnchorsDenied.to_string().is_empty());
-        assert!(!ErrorKind::TagsDenied.to_string().is_empty());
+        assert!(
+            !ErrorKind::AnchorsDenied.to_string().is_empty(),
+            "`AnchorsDenied` displays as empty"
+        );
+        assert!(
+            !ErrorKind::TagsDenied.to_string().is_empty(),
+            "`TagsDenied` displays as empty"
+        );
         assert!(
             !ErrorKind::ScalarLengthLimitExceeded {
                 limit: 4,
                 actual: 9
             }
             .to_string()
-            .is_empty()
+            .is_empty(),
+            "`ScalarLengthLimitExceeded` displays as empty"
         );
     }
 }

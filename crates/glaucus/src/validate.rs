@@ -109,7 +109,8 @@ mod tests {
     #[test]
     fn validate_str_ok_yields_no_diagnostics() {
         let schema = "type: object\nrequired: [name]\nproperties:\n  name: {type: string}\n";
-        assert!(validate_str("name: glaucus\n", schema).is_empty());
+        let got = validate_str("name: glaucus\n", schema);
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]
@@ -154,7 +155,11 @@ mod tests {
         // A valid schema but malformed data → the data parse-error arm.
         let diags = validate_str("a: [1, 2\n", "type: object\n");
         assert_eq!(diags.len(), 1);
-        assert!(diags[0].path.is_empty());
+        assert!(
+            diags[0].path.is_empty(),
+            "expected empty, got {:?}",
+            diags[0].path
+        );
         assert!(diags[0].message.contains("parse error"));
     }
 

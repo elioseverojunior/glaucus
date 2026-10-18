@@ -162,7 +162,7 @@ mod tests {
         let p = tmp("dirty.yaml", "a: 1   \n");
         let (code, out, err) = drive(&["glaucus", "fmt", "--check", p.to_str().unwrap()], "");
         assert_eq!(code, exit::FINDINGS);
-        assert!(out.is_empty());
+        assert!(out.is_empty(), "expected empty, got {out:?}");
         assert!(err.contains("dirty.yaml"), "file not named:\n{err}");
     }
 

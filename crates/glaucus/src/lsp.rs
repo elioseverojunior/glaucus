@@ -280,7 +280,8 @@ mod tests {
     #[test]
     fn initialized_notification_is_silent() {
         let mut s = Server::new();
-        assert!(s.handle("initialized", None, &json!(null)).is_empty());
+        let got = s.handle("initialized", None, &json!(null));
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]
@@ -290,7 +291,8 @@ mod tests {
         // `Server::handle` is a public, transport-agnostic entry point in its
         // own right and must handle "exit" the same way if called directly.
         let mut s = Server::new();
-        assert!(s.handle("exit", None, &json!(null)).is_empty());
+        let got = s.handle("exit", None, &json!(null));
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]
@@ -305,7 +307,8 @@ mod tests {
     #[test]
     fn unknown_notification_is_silent() {
         let mut s = Server::new();
-        assert!(s.handle("$/cancelRequest", None, &json!({})).is_empty());
+        let got = s.handle("$/cancelRequest", None, &json!({}));
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]
@@ -443,7 +446,7 @@ mod tests {
         let mut input: &[u8] = b"";
         let mut output: Vec<u8> = Vec::new();
         serve(&mut input, &mut output);
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]
@@ -452,7 +455,7 @@ mod tests {
         let mut input: &[u8] = b"Content-Leng";
         let mut output: Vec<u8> = Vec::new();
         serve(&mut input, &mut output);
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]
@@ -478,7 +481,7 @@ mod tests {
 
         serve(&mut input, &mut output);
 
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]
@@ -489,7 +492,7 @@ mod tests {
 
         serve(&mut input, &mut output);
 
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]
@@ -514,7 +517,7 @@ mod tests {
 
         serve(&mut input, &mut output);
 
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]

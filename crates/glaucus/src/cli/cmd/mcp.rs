@@ -29,7 +29,7 @@ mod tests {
     fn blank_lines_are_skipped() {
         let (code, out, _err) = drive(&["glaucus", "mcp"], "\n\n");
         assert_eq!(code, exit::OK);
-        assert!(out.is_empty());
+        assert!(out.is_empty(), "expected empty, got {out:?}");
     }
 
     #[test]

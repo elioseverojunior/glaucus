@@ -192,14 +192,14 @@ mod tests {
     fn emits_cst() {
         let (code, out, _err) = drive(&["glaucus", "parse", "--emit", "cst"], "a: 1 # c\n");
         assert_eq!(code, exit::OK);
-        assert!(!out.is_empty());
+        assert!(!out.is_empty(), "`out` is empty");
     }
 
     #[test]
     fn emits_ast() {
         let (code, out, _err) = drive(&["glaucus", "parse", "--emit", "ast"], "a: 1\n");
         assert_eq!(code, exit::OK);
-        assert!(!out.is_empty());
+        assert!(!out.is_empty(), "`out` is empty");
     }
 
     #[test]

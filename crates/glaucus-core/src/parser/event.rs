@@ -35,7 +35,7 @@ pub enum EventKind<'a> {
         /// The YAML version in force for this document.
         ///
         /// Comes from a `%YAML` directive when present, otherwise
-        /// [`YamlVersion::V1_2`]. Carried on the event because the directive is
+        /// [`YamlVersion::V1_2`](crate::types::YamlVersion::V1_2). Carried on the event because the directive is
         /// document-scoped: consumers must not let one document's version leak
         /// into the next.
         version: crate::types::YamlVersion,

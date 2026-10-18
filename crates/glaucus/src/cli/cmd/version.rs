@@ -148,7 +148,7 @@ mod tests {
     fn short_output_flag_works() {
         let (code, out, _err) = drive(&["glaucus", "version", "-o", "json"], "");
         assert_eq!(code, exit::OK);
-        assert!(!out.is_empty());
+        assert!(!out.is_empty(), "`out` is empty");
     }
 
     #[test]

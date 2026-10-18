@@ -34,7 +34,7 @@ mod tests {
         let (code, out, err) = drive(&["glaucus", "completions", "bash"], "");
         assert_eq!(code, exit::OK);
         assert!(out.contains("glaucus"), "no script:\n{out}");
-        assert!(err.is_empty());
+        assert!(err.is_empty(), "expected empty, got {err:?}");
     }
 
     #[test]
@@ -42,7 +42,7 @@ mod tests {
         for shell in ["zsh", "fish"] {
             let (code, out, _e) = drive(&["glaucus", "completions", shell], "");
             assert_eq!(code, exit::OK, "shell {shell} failed");
-            assert!(!out.is_empty());
+            assert!(!out.is_empty(), "`out` is empty");
         }
     }
 

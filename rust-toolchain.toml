@@ -17,7 +17,7 @@
 # treat that as a minor version bump. The `MSRV` job in cicd.yml enforces the
 # gap by compiling against `rust-version`, not against this file.
 [toolchain]
-channel = "1.97"
+channel = "1.99"
 profile = "default"
 # rustfmt + clippy come with `profile = "default"` but are listed explicitly as a
 # guarantee. llvm-tools is required by the cargo-tarpaulin llvm coverage engine

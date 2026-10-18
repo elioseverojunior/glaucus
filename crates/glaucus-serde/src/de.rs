@@ -1615,7 +1615,7 @@ mod tests {
     #[test]
     fn de_multi_empty_input() {
         let result: Vec<String> = from_str_multi("").unwrap();
-        assert!(result.is_empty());
+        assert!(result.is_empty(), "expected empty, got {result:?}");
     }
 
     // ─── Typed integer/float widths (drive deserialize_iN/uN/fN) ──────
