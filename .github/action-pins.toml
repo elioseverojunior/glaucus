@@ -42,9 +42,7 @@ ref_overrides = { "github/codeql-action" = "v4" }
 
 # Paths (relative to repo root) of reusable workflow references
 # that should be treated as external dependencies.
-reusable_paths = [
-  "slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml",
-]
+reusable_paths = []
 
 # Max concurrent GitHub API requests.  Lower if you hit secondary
 # rate limits, raise if you have a high token bucket.

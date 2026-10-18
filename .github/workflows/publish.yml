@@ -187,121 +187,21 @@ jobs:
             echo "Dry run mode (dry-run='${DRY_RUN}') - will not publish"
           fi
 
+  # Packaging and SLSA L3 provenance in one reusable workflow -- see the header
+  # of package.yml for why the attestation has to run there and not in a job of
+  # this file. `sign` and `publish-crates` consume its `crates` artifact.
   package:
-    name: Package crates
+    name: Package and attest
     needs: [validate]
     if: >
       success()
       && needs.validate.outputs.should_publish == 'true'
-    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
-    outputs:
-      hashes: ${{ steps.hash.outputs.hashes }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: "recursive"
-          fetch-depth: 0
-          fetch-tags: "true"
-          token: ${{ secrets.GITHUB_TOKEN || github.token }}
-
-      - uses: ./.github/actions/setup-rust-env
-        with:
-          cargo-tools: ""
-
-      - name: Package crates
-        run: |
-          set -Eeuo pipefail
-
-          mkdir -p dist
-
-          # `publish = false` gates `cargo publish` ONLY -- `cargo package` has no
-          # registry semantics and packages the dev-only crates regardless. Left
-          # unfiltered, the `cp` below drops glaucus-bench, glaucus-fuzz and
-          # glaucus-yaml-test-suite into dist/, where they get hashed, attested,
-          # cosign-signed and attached to the release. Derived, not hardcoded, so
-          # a future dev-only crate needs no edit here; see `crates:dev-only` in
-          # mise.toml for why the logic lives there.
-          #
-          # Assigned to a variable FIRST, then split -- not read straight from a
-          # process substitution. `read -ra ARR < <(cmd)` discards cmd's exit
-          # status entirely whenever cmd wrote any stdout before failing, so the
-          # task's fail-closed guard would be silently ignored (verified). Under
-          # `set -e` a failed command substitution in an assignment does abort.
-          EXCLUDE_ARGS="$(mise run crates:dev-only --flags --verbose)"
-          read -ra EXCLUDES <<< "${EXCLUDE_ARGS}"
-
-          # Neither `--no-verify` nor `--allow-dirty`. `--no-verify` skips the
-          # build check, so a crate that does not compile could still be
-          # packaged, hashed, attested and signed -- attesting to an artefact
-          # nothing had built. `--allow-dirty` hid a tree that did not match the
-          # tagged commit, which would have signed a tarball for a state no
-          # commit describes. At a tag both should hold, so a failure here is
-          # real news.
-          cargo package --workspace --all-features --verbose "${EXCLUDES[@]+"${EXCLUDES[@]}"}"
-          cargo package --workspace --all-features --list --verbose "${EXCLUDES[@]+"${EXCLUDES[@]}"}"
-          cp target/package/*.crate dist/
-
-      - name: Compute hashes
-        id: hash
-        working-directory: dist
-        run: echo "hashes=$(sha256sum ./*.crate | base64 -w0)" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        id: crates-dist
-        with:
-          name: crates
-          path: dist/*.crate
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        id: crates-target-package
-        with:
-          name: crates-target-package
-          path: dist/*
-
-  provenance:
-    name: SLSA L3 provenance
-    needs: [package]
     permissions:
-      actions: read
-      id-token: write
       contents: write
-    # A TAG, not a SHA -- the one place in this repo that cannot be SHA-pinned.
-    # The generator verifies its OWN provenance against its release tag and
-    # rejects anything else outright: "Invalid ref: f7dd8c54... Expected ref of
-    # the form refs/tags/vX.Y.Z". That rejection is what was failing the `final`
-    # job with exit 27; the "Repository is private" line above it was a red
-    # herring emitted before the ref check.
-    #
-    # This costs a point on OpenSSF Scorecard's Pinned-Dependencies check, which
-    # is the deliberate trade: SHA-pinning it means no provenance at all.
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
-    with:
-      base64-subjects: ${{ needs.package.outputs.hashes }}
-      # The repository is PUBLIC (`gh api repos/... -q .private` -> false), but the
-      # generator halted with "Repository is private. The workflow has halted in
-      # order to keep the repository name from being exposed in the public
-      # transparency log." It reads `github.event.repository.private`, which a
-      # `workflow_call` does not populate the way a directly-triggered run does,
-      # and treats absent as private.
-      #
-      # So this override says "publish to Rekor anyway", which is what a public
-      # repo wants. Nothing is leaked that is not already published: Cargo.toml's
-      # `repository` field carries this exact URL to crates.io.
-      #
-      # If the repo is ever made private, revisit -- the guard exists for a real
-      # reason and this flag switches it off.
-      # Only on a tag. `upload-assets` attaches the attestation to the Release
-      # for the CURRENT ref, and cicd.yml calls this workflow on a push to main --
-      # where `github.ref` is `refs/heads/main` and no release exists. The
-      # generator has no guard for that and failed its `final` job with exit 27
-      # (`SUCCESS: false`), taking the whole publish chain down with it.
-      #
-      # On a tag push the release does exist, so the attestation attaches as
-      # intended. Off a tag the provenance is still generated and still available
-      # as a workflow artifact -- only the release upload is skipped.
-      upload-assets: ${{ startsWith(github.ref, 'refs/tags/') }}
-      private-repository: true
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/package.yml
+    secrets: inherit
 
   sign:
     name: Sigstore signing
@@ -314,7 +214,7 @@ jobs:
       id-token: write
       contents: write
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: crates
           path: dist
@@ -327,7 +227,7 @@ jobs:
             cosign sign-blob --yes "$f" --bundle "$f.cosign.bundle"
           done
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signatures
           path: dist/*.cosign.bundle
@@ -335,9 +235,9 @@ jobs:
       # A workflow artifact is not a release asset: it expires, and it is
       # reachable only by navigating to the run. Signatures kept there cannot be
       # used -- nobody can `cosign verify-blob` an artefact they cannot find, so
-      # the signing ran, passed, and produced nothing usable. The provenance job
-      # already attaches its attestation via `upload-assets: true`; this is the
-      # same idea for the bundles.
+      # the signing ran, passed, and produced nothing usable. package.yml already
+      # attaches its provenance bundle the same way; this does it for the
+      # signatures.
       #
       # Skipped when no Release exists for the tag (a `workflow_call` from cicd.yml
       # can outrun release creation), so a missing Release does not fail signing
@@ -358,14 +258,14 @@ jobs:
 
   publish-crates:
     name: Publish crates to crates.io
-    # The whole point of the merge: publishing now waits on provenance AND
-    # signing. Across two workflows this dependency could not be expressed, so
-    # crates reached the registry unattested whenever the signing job was slower,
-    # failed, or never ran.
+    # The whole point of the merge: publishing now waits on provenance (produced
+    # inside `package`) AND signing. Across two workflows this dependency could
+    # not be expressed, so crates reached the registry unattested whenever the
+    # signing job was slower, failed, or never ran.
     #
     # No job-level `if` on should_publish: a dry run has to REACH here, or it
     # verifies nothing. Only the two steps that touch the registry are gated.
-    needs: [validate, provenance, sign]
+    needs: [validate, package, sign]
     if: >
       success()
       && needs.validate.outputs.should_publish == 'true'
@@ -709,7 +609,7 @@ jobs:
 
   summary:
     name: Publish Summary
-    needs: [validate, package, provenance, sign, publish-crates, gh-pages]
+    needs: [validate, package, sign, publish-crates, gh-pages]
     if: always()
     runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
     steps:
@@ -717,7 +617,7 @@ jobs:
         env:
           OWNER: ${{ github.repository_owner }}
           REPO: ${{ github.event.repository.name }}
-          PROVENANCE: ${{ needs.provenance.result }}
+          PROVENANCE: ${{ needs.package.result }}
           SIGN: ${{ needs.sign.result }}
           CRATES: ${{ needs.publish-crates.result }}
           DOCS: ${{ needs.gh-pages.result }}
@@ -731,7 +631,7 @@ jobs:
             echo ""
             echo "| Stage | Result |"
             echo "| --- | --- |"
-            echo "| SLSA provenance | ${PROVENANCE} |"
+            echo "| Package + SLSA L3 provenance | ${PROVENANCE} |"
             echo "| Sigstore signing | ${SIGN} |"
             echo "| crates.io | ${CRATES} |"
             echo "| Documentation | ${DOCS} |"
