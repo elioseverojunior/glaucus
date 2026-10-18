@@ -64,8 +64,10 @@ Key highlights:
   `ci.yml`).
 - `cargo vet` audits are tracked in `supply-chain/audits.toml`
   (`vet` job in `ci.yml`).
-- Release artifacts carry SLSA Level 3 provenance and are signed with
-  sigstore/cosign keyless signing (`release.yml`).
+- Release artifacts carry SLSA Build Level 3 provenance (`actions/attest`,
+  signed by the reusable `package.yml`; verify with `gh attestation verify
+  --signer-workflow`) and are signed with sigstore/cosign keyless signing
+  (`publish.yml`).
 - OpenSSF Scorecard runs weekly (`scorecard.yml`).
 - REUSE 3.3 license compliance is declared in `REUSE.toml`; every file in the
   repository is covered.

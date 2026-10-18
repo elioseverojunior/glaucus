@@ -1,0 +1,134 @@
+# SPDX-FileCopyrightText: Glaucus contributors
+#
+# SPDX-License-Identifier: MIT OR Apache-2.0
+
+name: Package and attest
+
+# Builds the release crates AND attests them, in one reusable workflow, because
+# that split is what makes the provenance SLSA Build Level 3.
+#
+# `actions/attest` signs with the identity of the workflow whose job runs it. In
+# a caller's own job that identity is the CALLER, which also controls every step
+# before the attestation -- so the provenance proves only "some job in this repo
+# produced these bytes" (Build L2). Run inside this reusable workflow, the
+# certificate names `.github/workflows/package.yml` as the signer: the build
+# steps that produced the subjects are exactly the ones in this file, and
+# publish.yml cannot inject any. Verifiers pin that with
+#
+#   gh attestation verify <file>.crate --repo elioseverojunior/glaucus \
+#     --signer-workflow elioseverojunior/glaucus/.github/workflows/package.yml
+#
+# This replaces slsa-framework/slsa-github-generator. The generator reached L3
+# the same way, but verifies itself against its own release TAG and so could
+# never be SHA-pinned -- the one standing Pinned-Dependencies finding in this
+# repo. Everything here is pinned by SHA like every other action.
+
+on:
+  workflow_call:
+
+# Read-only by default; the one job below states what it writes.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    name: Package and attest crates
+    runs-on: ${{ vars.RUNS_ON_ARM64 || vars.RUNS_ON || 'ubuntu-latest' }}
+    permissions:
+      # Upload the provenance bundle to the Release.
+      contents: write
+      # Sigstore keyless signing: the OIDC token is the signer identity.
+      id-token: write
+      # Store the attestation in the repository's attestations API.
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: "recursive"
+          fetch-depth: 0
+          fetch-tags: "true"
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+
+      - uses: ./.github/actions/setup-rust-env
+        with:
+          cargo-tools: ""
+
+      - name: Package crates
+        run: |
+          set -Eeuo pipefail
+
+          mkdir -p dist
+
+          # `publish = false` gates `cargo publish` ONLY -- `cargo package` has no
+          # registry semantics and packages the dev-only crates regardless. Left
+          # unfiltered, the `cp` below drops glaucus-bench, glaucus-fuzz and
+          # glaucus-yaml-test-suite into dist/, where they get hashed, attested,
+          # cosign-signed and attached to the release. Derived, not hardcoded, so
+          # a future dev-only crate needs no edit here; see `crates:dev-only` in
+          # mise.toml for why the logic lives there.
+          #
+          # Assigned to a variable FIRST, then split -- not read straight from a
+          # process substitution. `read -ra ARR < <(cmd)` discards cmd's exit
+          # status entirely whenever cmd wrote any stdout before failing, so the
+          # task's fail-closed guard would be silently ignored (verified). Under
+          # `set -e` a failed command substitution in an assignment does abort.
+          EXCLUDE_ARGS="$(mise run crates:dev-only --flags --verbose)"
+          read -ra EXCLUDES <<< "${EXCLUDE_ARGS}"
+
+          # Neither `--no-verify` nor `--allow-dirty`. `--no-verify` skips the
+          # build check, so a crate that does not compile could still be
+          # packaged, hashed, attested and signed -- attesting to an artefact
+          # nothing had built. `--allow-dirty` hid a tree that did not match the
+          # tagged commit, which would have signed a tarball for a state no
+          # commit describes. At a tag both should hold, so a failure here is
+          # real news.
+          cargo package --workspace --all-features --verbose "${EXCLUDES[@]+"${EXCLUDES[@]}"}"
+          cargo package --workspace --all-features --list --verbose "${EXCLUDES[@]+"${EXCLUDES[@]}"}"
+          cp target/package/*.crate dist/
+
+      # No `predicate*` inputs, so this emits SLSA build provenance. Public
+      # repositories also log it to the public-good Sigstore (Rekor) instance.
+      - name: Attest build provenance
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/*.crate
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: crates-dist
+        with:
+          name: crates
+          path: dist/*.crate
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        id: crates-target-package
+        with:
+          name: crates-target-package
+          path: dist/*
+
+      # The attestation already lives in the attestations API, which is what
+      # `gh attestation verify` reads. The bundle is also attached to the Release
+      # so it can be verified offline (`--bundle`), the way the generator's
+      # `.intoto.jsonl` used to be. Skipped, not failed, when no Release exists
+      # for the ref: a `workflow_call` from cicd.yml runs on main, where there is
+      # none.
+      - name: Attach provenance to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          TAG: ${{ github.ref_name }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -eo pipefail
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            # Copied, not labelled: `file#label` changes only the display label,
+            # and the asset would keep the action's temp-file name.
+            cp "${BUNDLE}" provenance.sigstore.json
+            gh release upload "${TAG}" provenance.sigstore.json --clobber
+            echo "Attached provenance to ${TAG}"
+          else
+            echo "::warning::No release for ${TAG}; provenance remains in the attestations API"
+          fi
