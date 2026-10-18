@@ -80,13 +80,14 @@ skip = [
 ]
 
 # Benchmark-only competitor engines, now present as dev-deps of glaucus-bench:
-# noyalib, serde_yaml_ng, serde-saphyr, yaml-rust2 and rust-yaml. Listing any of
-# them here would exempt its whole transitive tree from the multiple-versions
-# check, which is defensible — none is ever in the shipped glaucus-* library
-# graph. (serde_yml is deliberately not among them: RUSTSEC-2025-0068, unsound +
-# archived.)
+# noyalib, serde-saphyr, yaml-rust2 and rust-yaml. Listing any of them here
+# would exempt its whole transitive tree from the multiple-versions check, which
+# is defensible — none is ever in the shipped glaucus-* library graph.
+# (serde_yml is deliberately not among them: RUSTSEC-2025-0068, unsound +
+# archived. Nor is serde_yaml_ng: it is built on unsafe-libyaml, which
+# RUSTSEC-2024-0449 flags as unmaintained with no fix.)
 #
-# Left empty on purpose. All five are in the graph, so a root added here would
+# Left empty on purpose. All four are in the graph, so a root added here would
 # match — no `unmatched-skip-root` warning — but none of them currently causes a
 # duplicate that fails the check, and a skip-tree root is a broad exemption that
 # would also silence future duplicates deeper in that tree. Add a specific root

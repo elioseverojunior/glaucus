@@ -43,7 +43,7 @@ Each `[[bench]]` target sets `harness = false` and drives Criterion directly. Se
 | `parser`         | `parser`                                                                          | Tokens → `Event` (`Parser::next_event` loop) vs `yaml-rust2`'s event stream.                       |
 | `composer`       | `composer`                                                                        | Events → `Node` tree (`compose_all`) vs `yaml-rust2` and `rust-yaml` tree loads.                   |
 | `emitter`        | `emitter`                                                                         | `Node` tree → YAML text, emitting from each library's own pre-parsed tree (measures emission only).|
-| `serde`          | `serde_deserialize`, `serde_serialize`                                            | Typed/`Value` deserialize and serialize vs `serde_json`, `noyalib`, `serde_yaml_ng`, `serde-saphyr`.|
+| `serde`          | `serde_deserialize`, `serde_serialize`                                            | Typed/`Value` deserialize and serialize vs `serde_json`, `noyalib`, `serde-saphyr`.|
 | `end_to_end`     | `roundtrip_node`, `roundtrip_compare`, `full_pipeline_node`, `typed_struct`, `typed_large` | Parse→emit→parse roundtrips, cross-library load→emit, facade vs raw `compose_all` overhead, and typed-struct deserialize (incl. the integer-heavy large fixture for the SWAR decimal path). |
 
 All groups use `Throughput::Bytes` so results report MB/s, and parameterize over the three fixture sizes (`small`, `medium`, `large`) unless noted.
@@ -65,13 +65,14 @@ Benched against the YAML/serde ecosystem. All are **dev-dependencies of `glaucus
 | Crate            | Version  | Role in the benchmarks                                                                 |
 | ---------------- | -------- | -------------------------------------------------------------------------------------- |
 | `noyalib`        | 0.0.7    | **Deserialize target-to-beat** (Phase 4b). Compared in serde deserialize/serialize.    |
-| `serde_yaml_ng`  | 0.10     | Active `serde_yaml` fork. Compared in serde deserialize/serialize.                      |
 | `serde-saphyr`   | 0.0.27   | Saphyr-based serde adapter; no native `Value`, so it (de)serializes `serde_json::Value`.|
 | `yaml-rust2`     | 0.11     | Pipeline-stage (parser/composer/emitter) and tree-level roundtrip comparisons.         |
 | `rust-yaml`      | 1        | Tree-level load/dump and roundtrip (no streaming token/event API to compare).          |
 | `serde_json`     | 1        | Speed-of-light JSON baseline for the serde benches (parses the JSON-equivalent fixtures).|
 
 > `serde_yml` is intentionally **EXCLUDED**: RUSTSEC-2025-0068 (unsound segfault in its serializer) plus archived upstream. The `deny.toml` zero-advisory-tolerance policy forbids depending on it.
+>
+> `serde_yaml_ng` is **EXCLUDED** for the same reason: it is built on `unsafe-libyaml`, which RUSTSEC-2024-0449 flags as unmaintained (archived upstream, no fix).
 
 ## Architecture
 
