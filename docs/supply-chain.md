@@ -21,8 +21,9 @@ repository to the mechanism that implements it and where it runs.
 | **Supply-chain audits** | `cargo vet` — records in `supply-chain/audits.toml` | `mise run cargo:vet` | **not wired** — see below |
 | **License compliance** | REUSE 3.3 — every file covered via `REUSE.toml` globs + `LICENSES/` | `mise run comply` | `cicd.yml` — `lint` job, via the hk `comply` step |
 | **Static analysis** | CodeQL | CI only | `cicd.yml` — `sast` job → `codeql.yml` |
-| **Build provenance** | SLSA Level 3 via `slsa-framework/slsa-github-generator` | CI only | `publish.yml` |
+| **Build provenance** | SLSA Build Level 3 via `actions/attest`, run inside the reusable `package.yml` | CI only | `publish.yml` → `package.yml` |
 | **Artifact signing** | sigstore/cosign keyless signing (`.cosign.bundle` per artifact) | CI only | `publish.yml` |
+| **Container images** | One OCI index over `linux/amd64` + `linux/arm64`, each built natively on its own runner; build provenance via `actions/attest`, pushed to ghcr.io (`gh attestation verify oci://ghcr.io/elioseverojunior/glaucus:<tag> --repo elioseverojunior/glaucus`) | `mise run docker:build` | `docker-release.yml` |
 | **Project scorecard** | OpenSSF Scorecard (`ossf/scorecard-action`); weekly schedule | CI only | `scorecards.yml` |
 | **Fuzzing** | 9 `cargo-fuzz` targets — `fuzz_scanner`, `fuzz_parser`, `fuzz_round_trip`, `fuzz_limits`, `fuzz_alias_graph`, `fuzz_serde`, `fuzz_cst_roundtrip`, `fuzz_lossless_edit`, `fuzz_merge_keys` | `mise run fuzz:all` | `nightly.yml` — `fuzz` job |
 | **Test coverage** | `cargo-tarpaulin`, LLVM engine, **code and doctests both at 100%** (see below) | `mise run coverage` | `cicd.yml` — `tests` job |
@@ -41,12 +42,16 @@ cargo tarpaulin --workspace --engine llvm \
   --fail-under 100
 ```
 
+<!-- `${{ }}` is GitHub Actions syntax; v-pre stops Vue reading it as an interpolation. -->
+
+::: v-pre
 The threshold is declared once, in `mise.toml` as `RUST_COVERAGE_THRESHOLD = "100"`,
 and every other consumer reads it rather than restating it: the `coverage` task
 defaults `--threshold` to it, and `cicd.yml` passes
 `${{ vars.RUST_COVERAGE_THRESHOLD || '100' }}`. `codecov.yml` sets `target: 100%`
 with `threshold: 0%` on project, patch and every component, so no regression is
 tolerated there either.
+:::
 
 ### Controls that are NOT wired into CI
 
@@ -78,6 +83,18 @@ to verify compliance locally.
 **SLSA / cosign are release-only** — these controls run on tag pushes
 (`on: push: tags: ['v*']`) and are not part of the PR gate. They operate on
 the published `.tar.gz` / `.sha256` release assets.
+
+**Verifying provenance** — the attestation is signed by the reusable
+`package.yml`, not by its caller, which is what makes it Build Level 3. Pin that
+signer when verifying a downloaded crate:
+
+```bash
+gh attestation verify glaucus-<version>.crate --repo elioseverojunior/glaucus \
+  --signer-workflow elioseverojunior/glaucus/.github/workflows/package.yml
+```
+
+Each Release also carries the bundle as `provenance.sigstore.json`, for offline
+verification with `--bundle provenance.sigstore.json`.
 
 **Miri scope** — Miri tests `glaucus-core` and `glaucus-ast`. `glaucus-serde` and
 `glaucus-cst` pull in `serde` proc-macros which Miri does not yet fully support;

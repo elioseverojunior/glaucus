@@ -16,8 +16,8 @@
 # every stage declaring that name. A single shared `IMAGE_TAG` meant
 # `docker:build` passing the toolchain version produced
 # `debian:1.97-trixie`, which does not exist.
-ARG IMAGE_TAG_BUILD=1.97-slim-trixie@sha256:5c6f46a6e4472ab1ca7ba7d494e6677f2f219ebc02f32025d3986f057635ec9c
-ARG IMAGE_TAG_RUNTIME=trixie-slim@sha256:020c0d20b9880058cbe785a9db107156c3c75c2ac944a6aa7ab59f2add76a7bd
+ARG IMAGE_TAG_BUILD=1.99-slim-trixie@sha256:4df2ae8cfdfebdfc13a65da7f253b73d68983dc0339f2719bc17a279c913b13d
+ARG IMAGE_TAG_RUNTIME=trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f
 
 # Dependency stage
 
@@ -56,8 +56,17 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     clang \
     mold
 
-  case "$TARGETPLATFORM" in
-    "linux/arm64")
+  # A native build (BUILDPLATFORM == TARGETPLATFORM) needs no cross toolchain:
+  # Debian's own gcc/binutils already ship the triplet-prefixed names the
+  # builder stage exports (`aarch64-linux-gnu-gcc` on an arm64 host). That is
+  # how docker-release.yml builds each architecture -- on a runner of that
+  # architecture -- so only a local `--platform linux/arm64` build on an amd64
+  # host still cross-compiles.
+  case "$BUILDPLATFORM -> $TARGETPLATFORM" in
+    "linux/amd64 -> linux/amd64" | "linux/arm64 -> linux/arm64")
+      echo "Native $TARGETPLATFORM build, no cross-compilation tools needed."
+      ;;
+    "linux/amd64 -> linux/arm64")
       dpkg --add-architecture arm64
       apt-get update
       apt-get install -y --no-install-recommends \
@@ -66,11 +75,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libc6-dev-arm64-cross \
         libssl-dev:arm64
       ;;
-    "linux/amd64")
-      echo "Native amd64 platform, no cross-compilation tools needed."
-      ;;
     *)
-      echo "Unsupported target platform: $TARGETPLATFORM"
+      echo "Unsupported build: $BUILDPLATFORM -> $TARGETPLATFORM (build on a host of the target architecture)"
       exit 1
       ;;
   esac
