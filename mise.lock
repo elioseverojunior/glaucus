@@ -47,48 +47,48 @@ url_api = "https://api.github.com/repos/rhysd/actionlint/releases/assets/3849249
 provenance = "github-attestations"
 
 [[tools."aqua:hk"]]
-version = "1.54.0"
+version = "2.7.0"
 backend = "aqua:hk"
 
 [tools."aqua:hk".options]
 "vars.locked" = "false"
 
 [tools."aqua:hk"."platforms.linux-arm64"]
-checksum = "sha256:79458d7464bbdf63cd578ef9ece71003d3e53a993f9fa630888b93d3ae24dd79"
-url = "https://github.com/jdx/hk/releases/download/v1.54.0/hk-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/496037128"
+checksum = "sha256:a64c8cead6f9a47e6bf4d639122ca3eeba60480763076330ba230a8cb7821520"
+url = "https://github.com/jdx/hk/releases/download/v2.7.0/hk-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/hk/releases/assets/646980276"
 
 [tools."aqua:hk"."platforms.linux-arm64-musl"]
-checksum = "sha256:c1ad33f83265363440c7fc77656e604532049f038c42d7b8924fc43e5a3b935d"
-url = "https://github.com/jdx/hk/releases/download/v1.54.0/hk-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/496037132"
+checksum = "sha256:a64c8cead6f9a47e6bf4d639122ca3eeba60480763076330ba230a8cb7821520"
+url = "https://github.com/jdx/hk/releases/download/v2.7.0/hk-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/hk/releases/assets/646980276"
 
 [tools."aqua:hk"."platforms.linux-x64"]
-checksum = "sha256:467f691713b1afbeada4df662bd44696405cd987a5c7f64fee0fe71399628d0c"
-url = "https://github.com/jdx/hk/releases/download/v1.54.0/hk-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/496037136"
+checksum = "sha256:2d5819ee2bc3e5b424d90fb05928c05297bfa4d36490628b075b8f8afe14b7b1"
+url = "https://github.com/jdx/hk/releases/download/v2.7.0/hk-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/hk/releases/assets/646980316"
 
 [tools."aqua:hk"."platforms.linux-x64-musl"]
-checksum = "sha256:ddce69611ce32a08b481dd3ccd5c700b1d535d12c86be784bc6d74b1d6256546"
-url = "https://github.com/jdx/hk/releases/download/v1.54.0/hk-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/496037135"
+checksum = "sha256:2d5819ee2bc3e5b424d90fb05928c05297bfa4d36490628b075b8f8afe14b7b1"
+url = "https://github.com/jdx/hk/releases/download/v2.7.0/hk-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/jdx/hk/releases/assets/646980316"
 
 [tools."aqua:hk"."platforms.macos-arm64"]
-checksum = "sha256:54e47c56f64916e63004b68ae848637e3e90d06f89e3ae8de985ebc35fd9f7e7"
-url = "https://github.com/jdx/hk/releases/download/v1.54.0/hk-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/496037130"
+checksum = "sha256:3b98dd45e493a421de5b327c87b3e0fdfac39383e11b6a2b48b43bbc5a9ce0d6"
+url = "https://github.com/jdx/hk/releases/download/v2.7.0/hk-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/jdx/hk/releases/assets/646980274"
 
 [tools."aqua:hk"."platforms.windows-x64"]
-checksum = "sha256:ab0f65942c89c72b322c700bf427926f54db84fd2827121eab03287144d2ec64"
-url = "https://github.com/jdx/hk/releases/download/v1.54.0/hk-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/jdx/hk/releases/assets/496037131"
+checksum = "sha256:69fa61c4ef0ea7d25ccb2804b52c31e91be8f7c9cc1176aabe8ea780f3c5b0bb"
+url = "https://github.com/jdx/hk/releases/download/v2.7.0/hk-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/jdx/hk/releases/assets/646980285"
 
 [[tools."cargo:cargo-audit"]]
 version = "0.22.2"
 backend = "cargo:cargo-audit"
 
 [[tools."cargo:cargo-crap"]]
-version = "0.3.1"
+version = "0.8.0"
 backend = "cargo:cargo-crap"
 
 [[tools."cargo:cargo-criterion"]]
@@ -116,7 +116,7 @@ version = "27.1.0"
 backend = "cargo:cargo-mutants"
 
 [[tools."cargo:cargo-nextest"]]
-version = "0.9.140"
+version = "0.9.148"
 backend = "cargo:cargo-nextest"
 
 [[tools."cargo:cargo-pgo"]]
@@ -124,7 +124,7 @@ version = "0.3.0"
 backend = "cargo:cargo-pgo"
 
 [[tools."cargo:cargo-semver-checks"]]
-version = "0.49.0"
+version = "0.51.0"
 backend = "cargo:cargo-semver-checks"
 
 [[tools."cargo:cargo-sort"]]
@@ -132,7 +132,7 @@ version = "2.1.4"
 backend = "cargo:cargo-sort"
 
 [[tools."cargo:cargo-tarpaulin"]]
-version = "0.37.0"
+version = "0.37.5"
 backend = "cargo:cargo-tarpaulin"
 
 [[tools."cargo:cargo-update"]]
@@ -148,11 +148,11 @@ version = "1.1.11"
 backend = "cargo:committed"
 
 [[tools."cargo:flamegraph"]]
-version = "0.6.13"
+version = "0.6.14"
 backend = "cargo:flamegraph"
 
 [[tools."cargo:rumdl"]]
-version = "0.2.45"
+version = "0.2.79"
 backend = "cargo:rumdl"
 
 [[tools."cargo:taplo-cli"]]
@@ -164,43 +164,43 @@ version = "0.1.4"
 backend = "cargo:yamllint-rs"
 
 [[tools.git-cliff]]
-version = "2.13.1"
+version = "2.14.2"
 backend = "aqua:orhun/git-cliff"
 
 [tools.git-cliff."platforms.linux-arm64"]
-checksum = "sha256:9619b7f0c584229f8a2331c1905afe88bd938bdc9102926c2073836a42f02455"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-aarch64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850077"
+checksum = "sha256:69e208f6e4baef3a0f9b759d5f44223aa9336b86c691072a3d0c98d35a816e69"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-aarch64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573483780"
 
 [tools.git-cliff."platforms.linux-arm64-musl"]
-checksum = "sha256:4054c124b926c117f3fa048939bc8be0a954f29f3b6f367627e8cb22c1971882"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850720"
+checksum = "sha256:4be21b21ec9699af4d330b224aeba8a41d41d8f5b351ca2da8a9ea2bdc36380f"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573485334"
 
 [tools.git-cliff."platforms.linux-x64"]
-checksum = "sha256:9a1263f24e59a2f508c7b3d3283c9dea94a8bf697f96dbc18cc783cac6284546"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850439"
+checksum = "sha256:24f397c733add5390fdceee3a2088588ab0d5f944ce00d34cb7029b888cf2db4"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573483509"
 
 [tools.git-cliff."platforms.linux-x64-musl"]
-checksum = "sha256:200d2535da6d9703f3bcc8a4d159c3b55eacdb01cf2148c55b3eee9dd04d5249"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850671"
+checksum = "sha256:fa21e2fc70046fcfd0e43e5e4613873ab799aff3d9dc8559c00d31b270e417d0"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573485273"
 
 [tools.git-cliff."platforms.macos-arm64"]
-checksum = "sha256:21547ae4a0421164070ab75c2522864ea5565858a011fabc5f583061b20f1226"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405849885"
+checksum = "sha256:a0be97e237d440d34c5e508ec21d070b2c85cbb8be48a46a56f9a4e8bd247f05"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573487203"
 
 [tools.git-cliff."platforms.macos-x64"]
-checksum = "sha256:6e60ae390d375cecb9d8008c49f0e724a8dfe40390b532ef5501e421d2cc8acb"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405850193"
+checksum = "sha256:4e647d2deb152aca1e987f225cf42b080b991dd98f3bce4027ef95446d982ac3"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573484837"
 
 [tools.git-cliff."platforms.windows-x64"]
-checksum = "sha256:3ae3a5549e85c7ad5b20192ebcfee4371269deca51255f6f2f2e051c6541f5ca"
-url = "https://github.com/orhun/git-cliff/releases/download/v2.13.1/git-cliff-2.13.1-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/405851866"
+checksum = "sha256:6ece2112b3f4af462190ecbea4aeb1315fff6af415629b597f84319073c31131"
+url = "https://github.com/orhun/git-cliff/releases/download/v2.14.2/git-cliff-2.14.2-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/orhun/git-cliff/releases/assets/573487227"
 
 [[tools.gitleaks]]
 version = "8.30.1"
@@ -246,64 +246,43 @@ version = "11.3.1"
 backend = "pipx:codecov-cli"
 
 [[tools.scorecard]]
-version = "5.5.0"
+version = "5.6.0"
 backend = "aqua:ossf/scorecard"
 
 [tools.scorecard."platforms.linux-arm64"]
-checksum = "sha256:3ce59d20c1d53e540c4a14e0da1e0d96b3b294e8ddc96a3c5a7b8a637b32991e"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812978"
-
-[tools.scorecard."platforms.linux-arm64".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:3eacaceb3fdee6d0ba5df6ede45d1ada73321949029921bb63633802e8ec5951"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187120"
 
 [tools.scorecard."platforms.linux-arm64-musl"]
-checksum = "sha256:3ce59d20c1d53e540c4a14e0da1e0d96b3b294e8ddc96a3c5a7b8a637b32991e"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_linux_arm64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812978"
-
-[tools.scorecard."platforms.linux-arm64-musl".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:3eacaceb3fdee6d0ba5df6ede45d1ada73321949029921bb63633802e8ec5951"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_linux_arm64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187120"
 
 [tools.scorecard."platforms.linux-x64"]
-checksum = "sha256:83b90a05c1540ef1390db1cd5711e5fd04be9c1d8537fb84d39d02092d6a8dff"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812999"
-
-[tools.scorecard."platforms.linux-x64".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:19bde07129450cb65a95c6e3b9f34e034341579e6f0e241546ec3ae6efb2dd9a"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187119"
 
 [tools.scorecard."platforms.linux-x64-musl"]
-checksum = "sha256:83b90a05c1540ef1390db1cd5711e5fd04be9c1d8537fb84d39d02092d6a8dff"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812999"
-
-[tools.scorecard."platforms.linux-x64-musl".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:19bde07129450cb65a95c6e3b9f34e034341579e6f0e241546ec3ae6efb2dd9a"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187119"
 
 [tools.scorecard."platforms.macos-arm64"]
-checksum = "sha256:bac6371a4f810d6bdd0b65d63c3311906bdfe3ba0d76a5ea743ce24ced170fcf"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_darwin_arm64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812997"
-
-[tools.scorecard."platforms.macos-arm64".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:1537183c0fcc6d8d1572aabc7a949091a36a2ee6be5bcb65f487cbb0a7b40381"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_darwin_arm64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187121"
 
 [tools.scorecard."platforms.macos-x64"]
-checksum = "sha256:979487ca20e726f6a4d2bd63a0a4c544184f589724b3d12d2ba8d0ea80889063"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_darwin_amd64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812977"
-
-[tools.scorecard."platforms.macos-x64".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:6eb92048bc537810d383d7e28233b2f118e78b6fef9e47b2c427c4d01fc096ad"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_darwin_amd64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187117"
 
 [tools.scorecard."platforms.windows-x64"]
-checksum = "sha256:21ca42b37260785e670c58f602b483510099e7b1988e3c6eb5005f143dc2a2ab"
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/scorecard_5.5.0_windows_amd64.tar.gz"
-url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/403812975"
-
-[tools.scorecard."platforms.windows-x64".provenance.slsa]
-url = "https://github.com/ossf/scorecard/releases/download/v5.5.0/multiple.intoto.jsonl"
+checksum = "sha256:f69b8b91f38c35f326c1e02085d4c2f189d5e22be0083bc952181faf767fcf67"
+url = "https://github.com/ossf/scorecard/releases/download/v5.6.0/scorecard_5.6.0_windows_amd64.tar.gz"
+url_api = "https://api.github.com/repos/ossf/scorecard/releases/assets/632187167"
 
 [[tools.taplo]]
 version = "0.10.0"

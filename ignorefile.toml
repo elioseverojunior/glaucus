@@ -208,10 +208,11 @@ note = "Python Project Ignore"
 name = "Mise ###"
 
 [[gitignore.section.rule]]
-ignore = ["/mise.local.toml"]
+ignore = ["/mise.local.toml", "/mise.local.lock"]
 note = """
-mise.local.toml is machine-specific (written by `mise run setup`); mise.lock is
-committed on purpose, because [settings] lockfile = true pins tool versions."""
+mise.local.toml is machine-specific (written by `mise run setup`), and so is the
+mise.local.lock that `mise lock` writes beside it; mise.lock is committed on
+purpose, because [settings] lockfile = true pins tool versions."""
 
 [[gitignore.section]]
 name = "Development Tools"
