@@ -62,7 +62,6 @@ jobs:
       - uses: ./.github/actions/setup-rust-env
         with:
           toolchain: nightly
-          cargo-tools: cargo-fuzz
           cache-key-suffix: nightly
 
       - name: Check for fuzz targets
@@ -119,4 +118,4 @@ jobs:
 # to git, most of which Miri cannot execute at all.
 #
 # If unsafe is ever introduced, reinstate it: nightly channel, `components:
-# miri`, `cargo-tools: ""`, and `MIRIFLAGS=-Zmiri-strict-provenance`.
+# miri` and `MIRIFLAGS=-Zmiri-strict-provenance`.

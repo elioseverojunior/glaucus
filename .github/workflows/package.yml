@@ -54,8 +54,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN || github.token }}
 
       - uses: ./.github/actions/setup-rust-env
-        with:
-          cargo-tools: ""
 
       - name: Package crates
         run: |

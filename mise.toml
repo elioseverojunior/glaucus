@@ -44,6 +44,12 @@ _.file = ".env"
 [tools]
 # rust is provisioned from rust-toolchain.toml via [settings] above — no version
 # is repeated here, keeping rust-toolchain.toml the single source of truth.
+#
+# cargo-binstall is what mise's `cargo:` backend runs to fetch the prebuilt
+# binaries of the crates below; without it on PATH every one of them is
+# compiled from source. Declared bare (not `aqua:`) so the dotfiles' Brewfile
+# formula of the same name takes over through MISE_DISABLE_TOOLS.
+cargo-binstall = "latest"
 "cargo:cargo-audit" = { version = "latest" }
 "cargo:cargo-crap" = { version = "latest" }
 "cargo:cargo-criterion" = { version = "latest" }
