@@ -29,6 +29,9 @@ self-hosted-runner:
 config-variables:
   - RUNS_ON
   - RUNS_ON_ARM64
+  # docker-release.yml builds each architecture natively, so its amd64 leg
+  # needs a label that guarantees x64, which `RUNS_ON` does not.
+  - RUNS_ON_AMD64
   - RUST_COVERAGE_THRESHOLD
   # Not a GitHub repository variable: `mise run act:setup` writes it into
   # `.act/.vars`, which `.actrc` passes with `--var-file`, so only a local act
