@@ -2,8 +2,8 @@
 //
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-amends "package://github.com/jdx/hk/releases/download/v1.56.0/hk@1.56.0#/Config.pkl"
-import "package://github.com/jdx/hk/releases/download/v1.56.0/hk@1.56.0#/Builtins.pkl"
+amends "package://github.com/jdx/hk/releases/download/v2.7.0/hk@2.7.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.7.0/hk@2.7.0#/Builtins.pkl"
 
 local linters = new Mapping<String, Step> {
     ["check-added-large-files"] = new Step {
@@ -178,8 +178,12 @@ hooks {
         steps = linters
     }
 
+    // hk v2 stages fixes by default only for the `pre-commit` hook itself; every
+    // other hook leaves the index alone. This one is pre-commit over the whole
+    // tree, so it opts back in to keep the two behaving alike.
     ["pre-commit:all"] {
         fix = true
+        stage = true
         stash = "git"
         steps = linters
     }
