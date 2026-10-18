@@ -108,7 +108,8 @@ mod tests {
 
     #[test]
     fn the_empty_path_addresses_the_root() {
-        assert!(parse_path("").is_empty());
+        let got = parse_path("");
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]

@@ -723,7 +723,7 @@ mod tests {
     #[test]
     fn serde_from_str_multi_empty() {
         let docs: Vec<String> = from_str_multi("").unwrap();
-        assert!(docs.is_empty());
+        assert!(docs.is_empty(), "expected empty, got {docs:?}");
     }
 
     #[cfg(feature = "serde")]
@@ -806,7 +806,7 @@ mod tests {
     #[test]
     fn node_from_str_multi_node_empty_returns_empty_vec() {
         let docs = from_str_multi_node("").unwrap();
-        assert!(docs.is_empty());
+        assert!(docs.is_empty(), "expected empty, got {docs:?}");
     }
 
     #[cfg(feature = "ast")]
@@ -886,7 +886,7 @@ mod tests {
     fn serde_from_str_multi_with_empty_input() {
         let config = error::ParserConfig::default();
         let docs: Vec<String> = from_str_multi_with("", config).unwrap();
-        assert!(docs.is_empty());
+        assert!(docs.is_empty(), "expected empty, got {docs:?}");
     }
 
     #[cfg(feature = "serde")]
@@ -929,7 +929,7 @@ mod tests {
         let reader = std::io::Cursor::new(b"");
         let config = error::ParserConfig::default();
         let docs: Vec<String> = from_reader_multi_with(reader, config).unwrap();
-        assert!(docs.is_empty());
+        assert!(docs.is_empty(), "expected empty, got {docs:?}");
     }
 
     #[cfg(feature = "serde")]

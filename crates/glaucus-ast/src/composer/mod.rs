@@ -885,14 +885,14 @@ mod tests {
     fn empty_mapping() {
         let node = compose_one("{}");
         let entries = node.as_mapping().expect("expected mapping");
-        assert!(entries.is_empty());
+        assert!(entries.is_empty(), "expected empty, got {entries:?}");
     }
 
     #[test]
     fn empty_sequence() {
         let node = compose_one("[]");
         let items = node.as_sequence().expect("expected sequence");
-        assert!(items.is_empty());
+        assert!(items.is_empty(), "expected empty, got {items:?}");
     }
 
     #[test]
@@ -978,7 +978,7 @@ mod tests {
     #[test]
     fn empty_stream() {
         let docs = compose("");
-        assert!(docs.is_empty());
+        assert!(docs.is_empty(), "expected empty, got {docs:?}");
     }
 
     #[test]
@@ -1436,7 +1436,7 @@ mod tests {
     #[test]
     fn compose_all_empty() {
         let docs = compose_all("").unwrap();
-        assert!(docs.is_empty());
+        assert!(docs.is_empty(), "expected empty, got {docs:?}");
     }
 
     #[test]

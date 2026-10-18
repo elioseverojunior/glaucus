@@ -263,10 +263,8 @@ mod tests {
     #[test]
     fn initialized_notification_is_silent() {
         let mut s = Server::new();
-        assert!(
-            s.handle("notifications/initialized", None, &json!(null))
-                .is_empty()
-        );
+        let got = s.handle("notifications/initialized", None, &json!(null));
+        assert!(got.is_empty(), "expected empty, got {got:?}");
     }
 
     #[test]
@@ -311,7 +309,7 @@ mod tests {
     fn unknown_notification_is_silent() {
         let mut s = Server::new();
         let out = s.handle("$/something", None, &json!({}));
-        assert!(out.is_empty());
+        assert!(out.is_empty(), "expected empty, got {out:?}");
     }
 
     // ─── `tools/call` dispatch (per-tool behaviour lives in `tools::tests`) ──
@@ -341,7 +339,7 @@ mod tests {
         let mut input: &[u8] = b"";
         let mut output: Vec<u8> = Vec::new();
         serve(&mut input, &mut output);
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]
@@ -349,7 +347,7 @@ mod tests {
         let mut input: &[u8] = b"\n\n";
         let mut output: Vec<u8> = Vec::new();
         serve(&mut input, &mut output);
-        assert!(output.is_empty());
+        assert!(output.is_empty(), "expected empty, got {output:?}");
     }
 
     #[test]

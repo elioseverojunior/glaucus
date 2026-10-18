@@ -21,7 +21,7 @@
 //!
 //! These functions are the single answer. They belong beside
 //! [`ScalarStyle`](crate::types::ScalarStyle), [`Tag`](crate::types::Tag) and
-//! [`YamlVersion`](crate::types::YamlVersion), which describe the same domain.
+//! [`YamlVersion`], which describe the same domain.
 //!
 //! # Scope
 //!
