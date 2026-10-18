@@ -147,11 +147,11 @@ jobs:
           comply --version || true
           ignorefile --version || true
 
-      # cargo-binstall is the default `cargo-tools` entry and exists for mise's
-      # benefit: mise's `cargo:` backend looks for it at ~/.cargo/bin and, absent,
-      # compiles every pinned tool from source -- the ~9 minute `mise install`
-      # this whole arrangement was built to avoid. mise itself comes from
-      # mise-action and every later gate invokes it.
+      # cargo-binstall is declared in mise.toml's [tools] for mise's own benefit:
+      # its `cargo:` backend resolves it from the toolset and, absent, compiles
+      # every pinned tool from source -- the ~9 minute `mise install` this whole
+      # arrangement was built to avoid. mise itself comes from mise-action and
+      # every later gate invokes it.
       - name: Assert provisioning tools
         run: |
           set -Eeuo pipefail

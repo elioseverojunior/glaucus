@@ -32,25 +32,6 @@ inputs:
     description: "Additional rustup targets (e.g., wasm32-unknown-unknown)"
     required: false
     default: ""
-  cargo-tools:
-    description: >
-      Space-separated list of cargo tools to install via install-action.
-      Deliberately NOT routed through rust-toolchain's own `cargo-tools` input:
-      that would move these binaries under its `bin` cache layer, whose key is
-      derived from the resolved tool versions alone. The git-sourced tools below
-      land in the same `~/.cargo/bin` and their revs would not be in that key,
-      so a rev bump would keep serving a stale build. The dedicated cache below
-      keys on both and stays correct.
-
-      cargo-binstall is here for mise's benefit, not ours: mise's `cargo:`
-      backend shells out to ~/.cargo/bin/cargo-binstall and, finding none on a
-      runner, falls back to compiling each pinned tool from source -- which is
-      what made `mise install` take ~9 minutes.
-
-      mise.toml is otherwise the single source of truth for tool versions. A job
-      needing something outside it passes it here.
-    required: false
-    default: "cargo-binstall"
   comply-rev:
     description: >
       Git revision of elioseverojunior/comply to install. Pinned rather than
@@ -188,56 +169,36 @@ runs:
     - name: Compute cargo-bin cache key
       id: cache-names
       shell: bash
-      # Through the environment, not `${{ }}` interpolation: the tool list is an
-      # action input, and expanding one straight into a shell body is the
+      # Through the environment, not `${{ }}` interpolation: the revs are action
+      # inputs, and expanding one straight into a shell body is the
       # script-injection shape GitHub warns about.
       env:
-        CARGO_TOOLS: ${{ inputs.cargo-tools }}
         IGNOREFILE_REV: ${{ inputs.ignorefile-rev }}
         COMPLY_REV: ${{ inputs.comply-rev }}
         TOOLCHAIN_NAME: ${{ steps.rust-toolchain.outputs.name }}
       run: |
-        # `hashFiles` reads files, and the tool list is a string, so the key for
-        # the binary cache is hashed here instead. Keying on the list means
-        # adding or removing a tool invalidates it and nothing else does; the
-        # toolchain is in the key because the binaries sit alongside rustup's
-        # own shims in the same directory.
-        if command -v sha256sum >/dev/null 2>&1; then
-          tools_hash="$(printf '%s' "$CARGO_TOOLS" | sha256sum)"
-        else
-          tools_hash="$(printf '%s' "$CARGO_TOOLS" | shasum -a 256)"
-        fi
-        # The ISO week bounds staleness. Every tool is requested `@latest`, and
-        # the install step is skipped outright on a cache hit, so without a
-        # rotating component a hit would pin these binaries forever. One slow
-        # run a week buys a predictable refresh.
-        # Both git-source revs are in the key: this cache carries the ignorefile
-        # AND comply binaries, and their install steps are skipped on a hit. A
-        # key that named only one would keep serving a stale build of the other
-        # after its pin moved.
+        # This cache carries only the git-sourced ignorefile and comply builds,
+        # so both revs are the key: a key that named only one would keep serving
+        # a stale build of the other after its pin moved. The toolchain is in it
+        # because the binaries sit beside rustup's own shims in that directory.
+        # The ISO week bounds staleness of what they were compiled against. Every
+        # other tool comes from mise.toml and its own cache below.
         if command -v sha256sum >/dev/null 2>&1; then
           revs_hash="$(printf '%s-%s' "$IGNOREFILE_REV" "$COMPLY_REV" | sha256sum)"
         else
           revs_hash="$(printf '%s-%s' "$IGNOREFILE_REV" "$COMPLY_REV" | shasum -a 256)"
         fi
-        bin_key="cargo-bin-${{ runner.os }}-${{ runner.arch }}-${TOOLCHAIN_NAME}-${tools_hash:0:16}-${revs_hash:0:16}-$(date -u +%G%V)"
+        bin_key="cargo-bin-${{ runner.os }}-${{ runner.arch }}-${TOOLCHAIN_NAME}-${revs_hash:0:16}-$(date -u +%G%V)"
         echo "cargo-bin-key=${bin_key}" >> "$GITHUB_OUTPUT"
 
-    # Restored BEFORE the install step, so install-action finds the binaries
-    # already present and resolves rather than re-downloads.
+    # Restored BEFORE the install steps, which are skipped outright on a hit.
     - name: Cache cargo tool binaries
       id: cargo-bin
-      if: ${{ inputs.cargo-tools != '' }}
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cargo/bin
         key: ${{ steps.cache-names.outputs.cargo-bin-key }}
 
-    # Skipped outright on a cache hit. install-action does not consult the
-    # filesystem: asked for `cargo-audit@latest` it prints `info: installing`
-    # and downloads, whatever is already in `~/.cargo/bin`. Restoring the cache
-    # alone therefore changed nothing -- the binaries were present and all 21
-    # were fetched again regardless. The hit itself has to gate the step.
     # hk.pkl's `gitignore` step runs `mise run gitignore:check`, and cicd.yml's lint
     # job runs `hk check --all` -- so without this the gate fails with
     # `ignorefile: command not found`. Not in mise.toml's [tools] because mise's
@@ -283,15 +244,35 @@ runs:
           --rev "${REV}" \
           comply
 
-    - name: Install cargo tools
-      if: ${{ inputs.cargo-tools != '' && steps.cargo-bin.outputs.cache-hit != 'true' }}
-      uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+    # mise-action's own cache is exact-key only: any version bump in mise.lock
+    # missed it and reinstalled every tool from nothing. Several `cargo:` crates
+    # publish no GitHub release binary, and mise runs cargo-binstall with
+    # quick-install disabled, so it logs `cargo-binstall failed` and falls back
+    # to `cargo install` for them. Run 39139181530 spent 9m50s compiling tools
+    # that had not changed. `restore-keys` brings back the
+    # previous lock's installs, and `mise install --locked` then fetches only
+    # what moved. Only `installs` is cached: the mise binary itself is
+    # mise-action's to choose.
+    - name: Cache mise tool installs
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        tool: |
-          ${{ inputs.cargo-tools }}
+        path: ~/.local/share/mise/installs
+        key: mise-installs-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/mise.lock') || hashFiles('**/mise.toml') }}
+        restore-keys: |
+          mise-installs-${{ runner.os }}-${{ runner.arch }}-
 
     - name: Setup mise
       uses: jdx/mise-action@9b200bcecbfd6303e69a4a261b2e09e3757440a7 # v5.2.0
       with:
-        cache_key_prefix: mise
-        cache_key: mise-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/mise.lock') || hashFiles('**/mise.toml') }}
+        cache: false
+
+    # A restore-keys hit carries the superseded versions along with the current
+    # ones, and the cache saved at the end of the job would keep growing with
+    # each bump. Pruning before that save drops them. Safe on a runner: the
+    # tracked-configs list lives in ~/.local/state, which is not cached, so the
+    # only config mise knows of is this checkout's.
+    - name: Prune superseded mise tool versions
+      shell: bash
+      run: |
+        set -Eeuo pipefail
+        mise prune --tools --yes
