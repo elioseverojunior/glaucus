@@ -273,6 +273,12 @@ class ActionRef:
         return s
 
 
+def _major_from_comment(line: str) -> Optional[int]:
+    """Major version named by the trailing ``# vX.Y.Z`` comment of a SHA pin."""
+    m = re.search(r"#\s*v(\d+)(?:\.\d+)*\s*$", line)
+    return int(m.group(1)) if m else None
+
+
 def parse_uses(line: str, file: Path, line_index: int) -> Optional[ActionRef]:
     m = re.search(r'uses:\s*["\']?([^"\'#\s]+)', line)
     if not m:
@@ -296,7 +302,8 @@ def parse_uses(line: str, file: Path, line_index: int) -> Optional[ActionRef]:
         return None
 
     if re.match(r"^[0-9a-f]{40}$", ref):
-        return ActionRef(file, line_index, value, repo, path_suffix, "sha", ref)
+        major = _major_from_comment(line)
+        return ActionRef(file, line_index, value, repo, path_suffix, "sha", ref, major)
 
     if ref.startswith("v") and ref[1:].replace(".", "").isdigit():
         major = int(ref[1:].split(".")[0]) if "." in ref else int(ref[1:])
@@ -436,6 +443,43 @@ async def latest_release(client: httpx.AsyncClient, repo: str) -> Tuple[str, str
     return tag, sha
 
 
+def _version_key(tag: str) -> Tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", tag))
+
+
+async def release_in_major(
+    client: httpx.AsyncClient, repo: str, major: int,
+) -> Optional[Tuple[str, str]]:
+    """Newest public release of *repo* whose tag is in *major*, as (tag, sha)."""
+    releases = await _gh_get(client, f"{GH_API}/repos/{repo}/releases?per_page=100")
+    pattern = re.compile(rf"^v?{major}(\.\d+)*$")
+    tags = [
+        r["tag_name"]
+        for r in releases
+        if not r.get("draft") and not r.get("prerelease") and pattern.match(r["tag_name"])
+    ]
+    if not tags:
+        return None
+    tag = max(tags, key=_version_key)
+    return tag, await resolve_tag_sha(client, repo, tag)
+
+
+async def _major_bump(
+    client: httpx.AsyncClient, ar: ActionRef, tag: str, sha: str, latest_major: int,
+) -> PinResult:
+    """A major bump, carrying the newest in-major release for the safe update."""
+    in_major = await release_in_major(client, ar.repo, ar.major or 0)
+    return PinResult(
+        ar,
+        "major-bump",
+        new_sha=sha,
+        tag=tag,
+        message=f"major bump: v{ar.major} -> v{latest_major} ({tag})",
+        in_major_tag=in_major[0] if in_major else None,
+        in_major_sha=in_major[1] if in_major else None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-ref logic
 # ---------------------------------------------------------------------------
@@ -450,6 +494,10 @@ class PinResult:
     message: str = ""
     # True when the ref must be written as `@<tag>` rather than `@<sha> # <tag>`.
     pin_as_tag: bool = False
+    # For a major-bump: the newest release INSIDE the pinned major, if any, so
+    # minor and patch updates keep flowing while the bump awaits --apply-major.
+    in_major_tag: Optional[str] = None
+    in_major_sha: Optional[str] = None
 
 
 def _updated(ar: ActionRef, sha: str, tag: str) -> PinResult:
@@ -511,15 +559,16 @@ async def check_ref(client: httpx.AsyncClient, ar: ActionRef) -> PinResult:
         if ar.ref_type == "sha":
             if sha == ar.current_ref:
                 return PinResult(ar, "uptodate", tag=tag, message=f"already at {tag}")
-            latest_major = _major_of(tag)
-            if latest_major is not None and ar.major is not None and latest_major > ar.major:
+            if ar.major is None and ar.repo not in CFG.branch_only_repos:
                 return PinResult(
                     ar,
-                    "major-bump",
-                    new_sha=sha,
-                    tag=tag,
-                    message=f"major bump: v{ar.major} -> v{latest_major} ({tag})",
+                    "error",
+                    message="SHA pin without a trailing '# vX.Y.Z' comment: "
+                    "cannot tell its major, add the comment",
                 )
+            latest_major = _major_of(tag)
+            if latest_major is not None and ar.major is not None and latest_major > ar.major:
+                return await _major_bump(client, ar, tag, sha, latest_major)
             return _updated(ar, sha, tag)
 
         # Tag ref.
@@ -528,13 +577,7 @@ async def check_ref(client: httpx.AsyncClient, ar: ActionRef) -> PinResult:
         if ar.major is not None:
             latest_major = _major_of(tag)
             if latest_major is not None and latest_major > ar.major:
-                return PinResult(
-                    ar,
-                    "major-bump",
-                    new_sha=sha,
-                    tag=tag,
-                    message=f"major bump: v{ar.major} -> v{latest_major} ({tag})",
-                )
+                return await _major_bump(client, ar, tag, sha, latest_major)
         return _updated(ar, sha, tag)
 
     except RuntimeError as exc:
@@ -680,6 +723,13 @@ async def main_async(args: argparse.Namespace) -> int:
                     log.info(
                         f"       -> {r.ref.file.name}:{r.ref.line_index + 1}",
                     )
+            elif r.in_major_sha and r.in_major_sha != r.ref.current_ref:
+                changed += 1
+                log.info(f"  UP  {tag_display:50s}  {r.in_major_tag} (same major)")
+                if args.write and await apply_pin(
+                    r.ref.file, r.ref, r.in_major_sha, tag=r.in_major_tag,
+                ):
+                    log.info(f"       -> {r.ref.file.name}:{r.ref.line_index + 1}")
         elif r.status == "updated":
             changed += 1
             log.info(f"  UP  {tag_display:50s}  {r.message}")
@@ -750,7 +800,7 @@ def main() -> int:
         "--config",
         type=str,
         default=None,
-        help="path to config file (JSON / YAML / TOML)",
+        help="path to config file (TOML / JSON)",
     )
     ap.add_argument(
         "--print-config",
