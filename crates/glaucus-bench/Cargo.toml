@@ -28,7 +28,6 @@ noyalib = { version = ">=0.0.7" }
 rust-yaml = { version = ">=1" }
 serde-saphyr = { version = ">=0.0.27" }
 serde_json.workspace = true
-serde_yaml_ng = { version = ">=0.10" }
 yaml-rust2 = { version = ">=0.11.0" }
 
 # The library target has no #[bench] functions, but `cargo bench`
