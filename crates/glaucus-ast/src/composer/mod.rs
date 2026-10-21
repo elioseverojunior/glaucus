@@ -568,15 +568,10 @@ impl<'a> Composer<'a> {
     }
 
     fn resolve_tag(tag: (Cow<'a, str>, Cow<'a, str>), span: Span) -> Tag<'a> {
-        let (handle, suffix) = tag;
-        // Tags are pre-resolved by the parser using %TAG directives.
-        // Handle is already the resolved prefix.
-        let value = if handle.is_empty() && suffix.is_empty() {
-            Cow::Borrowed("!")
-        } else {
-            Cow::Owned(format!("{handle}{suffix}"))
-        };
-        Tag { value, span }
+        // Delegates to `Tag::resolve` so the streaming deserialiser builds tags
+        // identically. The resulting URI is what `CoreTag::from_uri` matches, so
+        // two copies of this would change what `!!int` means on one path.
+        Tag::resolve(tag.0, tag.1, span)
     }
 
     // ─── Anchor management ──────────────────────────────────────────

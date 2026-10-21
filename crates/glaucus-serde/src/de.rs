@@ -42,6 +42,102 @@ impl<'a> Deserializer<'a> {
     }
 }
 
+/// What a plain scalar resolves to, before any visitor is chosen.
+///
+/// Shared by the tree path and the streaming path. The ORDER of the checks is
+/// the part that could drift between two engines -- unsigned before signed so a
+/// large positive integer does not overflow, integer before float because every
+/// integer also parses as one -- so it lives in one place and both callers ask
+/// the same question.
+///
+/// The emit step is deliberately NOT shared: the tree path borrows from a `Node`
+/// and the streaming path borrows from the input, so one calls `visit_str` and
+/// the other `visit_borrowed_str`. That difference is real and lifetime-driven,
+/// unlike the ordering.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Resolved {
+    Null,
+    Bool(bool),
+    I64(i64),
+    U64(u64),
+    F64(f64),
+    /// Nothing matched; the scalar is text.
+    Str,
+}
+
+/// Classifies a PLAIN scalar under `version`.
+///
+/// Quoted scalars must not reach this: quoting is the author stating the value is
+/// text, and the caller checks style before asking.
+pub(crate) fn classify_plain(value: &str, version: YamlVersion) -> Resolved {
+    if schema::is_null(value) {
+        return Resolved::Null;
+    }
+    if let Some(b) = schema::resolve_bool(value, version) {
+        return Resolved::Bool(b);
+    }
+    // Unsigned first, so a value above `i64::MAX` still resolves; the caller
+    // narrows to `i64` when it fits so small positives reach signed targets.
+    if let Some(u) = schema::resolve_uint(value) {
+        return i64::try_from(u).map_or(Resolved::U64(u), Resolved::I64);
+    }
+    if let Some(i) = schema::resolve_int(value) {
+        return Resolved::I64(i);
+    }
+    if let Some(f) = schema::resolve_float(value) {
+        return Resolved::F64(f);
+    }
+    Resolved::Str
+}
+
+/// Resolves a scalar according to its explicit core-schema tag.
+///
+/// Free rather than a method so the streaming path can call it too. Duplicating
+/// it there would recreate #40 one layer up.
+pub(crate) fn visit_core_tagged_value<'de, V>(
+    tag: CoreTag,
+    value: &str,
+    version: YamlVersion,
+    visitor: V,
+) -> Result<V::Value, Error>
+where
+    V: Visitor<'de>,
+{
+    match tag {
+        CoreTag::Str => visitor.visit_str(value),
+        CoreTag::Int => {
+            if let Some(u) = schema::resolve_uint(value) {
+                if let Ok(i) = i64::try_from(u) {
+                    return visitor.visit_i64(i);
+                }
+                return visitor.visit_u64(u);
+            }
+            schema::resolve_int(value).map_or_else(
+                || Err(err(format!("`!!int` scalar is not an integer: `{value}`"))),
+                |i| visitor.visit_i64(i),
+            )
+        }
+        CoreTag::Float => schema::resolve_float(value).map_or_else(
+            || Err(err(format!("`!!float` scalar is not a float: `{value}`"))),
+            |f| visitor.visit_f64(f),
+        ),
+        CoreTag::Bool => schema::resolve_bool(value, version).map_or_else(
+            || Err(err(format!("`!!bool` scalar is not a boolean: `{value}`"))),
+            |b| visitor.visit_bool(b),
+        ),
+        CoreTag::Null => {
+            if schema::is_null(value) {
+                return visitor.visit_unit();
+            }
+            Err(err(format!("`!!null` scalar is not null: `{value}`")))
+        }
+        CoreTag::Binary => crate::base64::decode(value).map_or_else(
+            || Err(err("`!!binary` scalar is not valid base64")),
+            |bytes| visitor.visit_byte_buf(bytes),
+        ),
+    }
+}
+
 /// A YAML core-schema tag, resolved to the type it asserts.
 ///
 /// An explicit tag is the ONE mechanism a YAML author has to override implicit
@@ -49,7 +145,7 @@ impl<'a> Deserializer<'a> {
 /// a quoted field as a number. Ignoring it turns the author's explicit intent
 /// into a silently different value.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum CoreTag {
+pub(crate) enum CoreTag {
     Str,
     Int,
     Float,
@@ -62,7 +158,7 @@ impl CoreTag {
     /// Classifies a resolved tag URI, or `None` for anything not in the core
     /// schema — custom and application tags must keep flowing through normal
     /// resolution rather than being reinterpreted here.
-    fn from_uri(uri: &str) -> Option<Self> {
+    pub(crate) fn from_uri(uri: &str) -> Option<Self> {
         match uri.strip_prefix("tag:yaml.org,2002:")? {
             "str" => Some(Self::Str),
             "int" => Some(Self::Int),
@@ -109,42 +205,22 @@ impl<'de> de::Deserializer<'de> for &mut Deserializer<'_> {
                     };
                 }
 
-                // Null
-                if schema::is_null(value) {
-                    return visitor.visit_unit();
-                }
-
-                // Bool
-                if schema::resolve_bool(value, self.version()) == Some(true) {
-                    return visitor.visit_bool(true);
-                }
-                if schema::resolve_bool(value, self.version()) == Some(false) {
-                    return visitor.visit_bool(false);
-                }
-
-                // Integer (try unsigned first for large positive values)
-                if let Some(u) = schema::resolve_uint(value) {
-                    // Prefer the signed visitor when the value fits, so small
-                    // positive integers deserialize into `i64` targets.
-                    if let Ok(i) = i64::try_from(u) {
-                        return visitor.visit_i64(i);
-                    }
-                    return visitor.visit_u64(u);
-                }
-                if let Some(i) = schema::resolve_int(value) {
-                    return visitor.visit_i64(i);
-                }
-
-                // Float
-                if let Some(f) = schema::resolve_float(value) {
-                    return visitor.visit_f64(f);
-                }
-
-                // Plain string fallback.
-                // For Cow::Owned, visit_string avoids an extra clone.
-                match &s.value {
-                    std::borrow::Cow::Owned(v) => visitor.visit_string(v.clone()),
-                    std::borrow::Cow::Borrowed(_) => visitor.visit_str(value),
+                // The ordering lives in `classify_plain`, shared with the
+                // streaming path, so two engines cannot drift on it. Only the
+                // emit differs: this path borrows from a `Node`, so it calls
+                // `visit_str`; the streaming path borrows from the input and
+                // calls `visit_borrowed_str`.
+                match classify_plain(value, self.version()) {
+                    Resolved::Null => visitor.visit_unit(),
+                    Resolved::Bool(b) => visitor.visit_bool(b),
+                    Resolved::I64(i) => visitor.visit_i64(i),
+                    Resolved::U64(u) => visitor.visit_u64(u),
+                    Resolved::F64(f) => visitor.visit_f64(f),
+                    // For Cow::Owned, visit_string avoids an extra clone.
+                    Resolved::Str => match &s.value {
+                        std::borrow::Cow::Owned(v) => visitor.visit_string(v.clone()),
+                        std::borrow::Cow::Borrowed(_) => visitor.visit_str(value),
+                    },
                 }
             }
         }
@@ -415,58 +491,7 @@ impl Deserializer<'_> {
     where
         V: Visitor<'de>,
     {
-        let value = self.scalar_value()?;
-
-        match tag {
-            // Any content is valid `!!str`; that is what makes it the escape hatch.
-            CoreTag::Str => visitor.visit_str(value),
-
-            CoreTag::Int => {
-                // Early returns rather than `map_or_else`: both arms would need to
-                // capture `visitor`, and it can only be moved into one closure.
-                if let Some(u) = schema::resolve_uint(value) {
-                    if let Ok(i) = i64::try_from(u) {
-                        return visitor.visit_i64(i);
-                    }
-                    return visitor.visit_u64(u);
-                }
-                schema::resolve_int(value).map_or_else(
-                    || Err(err(format!("`!!int` scalar is not an integer: `{value}`"))),
-                    |i| visitor.visit_i64(i),
-                )
-            }
-
-            CoreTag::Float => schema::resolve_float(value).map_or_else(
-                || Err(err(format!("`!!float` scalar is not a float: `{value}`"))),
-                |f| visitor.visit_f64(f),
-            ),
-
-            // Reuses the deserialiser's own bool recognition, so `!!bool` widens
-            // to the YAML 1.1 spellings exactly when `yaml_1_1` is set and not
-            // otherwise. A second, divergent notion of "boolean" here would be a
-            // bug farm.
-            CoreTag::Bool => {
-                if schema::resolve_bool(value, self.version()) == Some(true) {
-                    return visitor.visit_bool(true);
-                }
-                if schema::resolve_bool(value, self.version()) == Some(false) {
-                    return visitor.visit_bool(false);
-                }
-                Err(err(format!("`!!bool` scalar is not a boolean: `{value}`")))
-            }
-
-            CoreTag::Null => {
-                if schema::is_null(value) {
-                    return visitor.visit_unit();
-                }
-                Err(err(format!("`!!null` scalar is not null: `{value}`")))
-            }
-
-            CoreTag::Binary => crate::base64::decode(value).map_or_else(
-                || Err(err("`!!binary` scalar is not valid base64")),
-                |bytes| visitor.visit_byte_buf(bytes),
-            ),
-        }
+        visit_core_tagged_value(tag, self.scalar_value()?, self.version(), visitor)
     }
 
     fn parse_int(&self) -> Result<i64, Error> {
@@ -575,7 +600,7 @@ impl<'de> de::MapAccess<'de> for MapAccess<'_> {
 /// Returns `None` for core-schema shorthand tags (`!!str`) and global/URI tags
 /// (`tag:yaml.org,2002:int`), which denote a *data type* rather than a serde
 /// variant — those must flow through normal scalar/mapping resolution.
-fn external_variant_tag<'a>(tag: &'a Tag<'_>) -> Option<&'a str> {
+pub(crate) fn external_variant_tag<'a>(tag: &'a Tag<'_>) -> Option<&'a str> {
     let name = tag.value.strip_prefix('!')?;
     if name.is_empty() || name.starts_with('!') {
         return None;
@@ -722,15 +747,49 @@ pub fn from_str<T: DeserializeOwned + 'static>(input: &str) -> crate::error::Res
             .expect("TypeId of T equals TypeId of Value, downcast is infallible"));
     }
 
+    from_str_streaming(input, glaucus_core::error::ParserConfig::default())
+}
+
+/// Deserialises `input` through the streaming path.
+///
+/// The tree path composes a `Node` graph first; this walks parser events and
+/// fills `T` directly, so nothing is materialised that `T` does not ask for.
+///
+/// `Value` never arrives here. It IS a tree, so streaming into one would have to
+/// build the same graph anyway -- routing it through this would add work rather
+/// than remove it.
+fn from_str_streaming<T: DeserializeOwned>(
+    input: &str,
+    config: glaucus_core::error::ParserConfig,
+) -> crate::error::Result<T> {
+    // The config flag and the in-document directive are both honoured, and
+    // either alone is enough; `skip_framing` raises this if the document
+    // declares 1.1. Same rule as the tree path above -- neither can turn the
+    // other off.
+    let options = crate::stream::value::StreamOptions {
+        version: if config.yaml_1_1 {
+            YamlVersion::V1_1
+        } else {
+            YamlVersion::V1_2
+        },
+        merge_keys: config.merge_keys,
+        // Duplicate keys are refused in strict mode, which is the default. The
+        // tree path checks this while building each mapping; with no mapping
+        // being built, the streaming path has to check as keys go past.
+        strict: config.strictness == glaucus_core::error::Strictness::Strict,
+    };
+
+    let mut tape = crate::stream::tape::Tape::with_config(input, config);
+    let mut de = crate::stream::value::EventDeserializer::new(&mut tape, options);
+    de.skip_framing()?;
+
     // An empty stream is a null document, not an error -- see
-    // `glaucus_ast::composer::compose_one`. The version comes back alongside the
-    // node because a `%YAML 1.1` directive selects 1.1 scalar resolution for this
-    // document, and the node alone cannot say which schema applies to it.
-    let (node, version) = glaucus_ast::composer::compose_one_versioned(
-        input,
-        glaucus_core::error::ParserConfig::default(),
-    )?;
-    let mut de = Deserializer::from_node_with(&node, version.is_1_1());
+    // `glaucus_ast::composer::compose_one`. Checked here rather than inside the
+    // deserialiser, where "nothing left" has to stay a truncation error.
+    if de.at_end()? {
+        return crate::stream::value::deserialize_null_document(de.options());
+    }
+
     T::deserialize(&mut de)
 }
 
@@ -785,14 +844,7 @@ pub fn from_str_with<T: DeserializeOwned + 'static>(
             .expect("TypeId of T equals TypeId of Value, downcast is infallible"));
     }
 
-    // The config flag and the in-document directive are both honoured, and either
-    // one alone is enough. The flag is for callers whose input carries no
-    // directive; the directive is for documents that declare their own version.
-    // Neither can turn the other off.
-    let yaml_1_1 = config.yaml_1_1;
-    let (node, version) = glaucus_ast::composer::compose_one_versioned(input, config)?;
-    let mut de = Deserializer::from_node_with(&node, yaml_1_1 || version.is_1_1());
-    T::deserialize(&mut de)
+    from_str_streaming(input, config)
 }
 
 /// Deserializes a YAML string into a Rust type from a reader, with custom parser configuration.
@@ -884,6 +936,41 @@ pub fn from_str_multi_with<T: DeserializeOwned + 'static>(
 mod tests {
     use super::*;
     use serde::Deserialize;
+
+    /// Deserialises through the `Node` tree, which `from_str` no longer does.
+    fn tree_path<T: DeserializeOwned + 'static>(yaml: &str) -> crate::error::Result<T> {
+        let (node, version) = glaucus_ast::composer::compose_one_versioned(
+            yaml,
+            glaucus_core::error::ParserConfig::default(),
+        )?;
+        let mut de = Deserializer::from_node_with(&node, version.is_1_1());
+        T::deserialize(&mut de)
+    }
+
+    /// Shadows [`super::from_str`] so every test below runs BOTH engines.
+    ///
+    /// These tests were written against the tree path and describe what
+    /// `from_str` does; since #57 that streams. Calling only the public
+    /// function would leave the tree path -- still reachable through
+    /// `Deserializer::from_node` and the `Value` fast path -- untested, and
+    /// calling only the tree path would stop testing what callers actually get.
+    ///
+    /// Running both makes each test a differential case for free. Only the
+    /// verdict is compared: two engines may refuse the same document for the
+    /// same reason and word it differently, and the streaming result is what is
+    /// returned, because that is what a caller receives.
+    fn from_str<T: DeserializeOwned + 'static>(yaml: &str) -> crate::error::Result<T> {
+        let streaming = super::from_str::<T>(yaml);
+        let tree = tree_path::<T>(yaml);
+        assert_eq!(
+            streaming.is_ok(),
+            tree.is_ok(),
+            "engines disagreed on {yaml:?}\n  streaming: {:?}\n  tree:      {:?}",
+            streaming.as_ref().err(),
+            tree.as_ref().err(),
+        );
+        streaming
+    }
 
     #[test]
     fn de_string() {

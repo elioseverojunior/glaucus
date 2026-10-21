@@ -8,6 +8,7 @@
 //! the pipeline. The tree types (`Node`, `Scalar`, `Sequence`, `Mapping`)
 //! are defined in and re-exported from `glaucus-ast`.
 
+use std::borrow::Cow;
 use std::fmt;
 
 // ─── Source Location ────────────────────────────────────────────────
@@ -89,9 +90,37 @@ impl fmt::Display for Span {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Tag<'a> {
     /// The resolved tag URI.
-    pub value: std::borrow::Cow<'a, str>,
+    pub value: Cow<'a, str>,
     /// Source span of the tag in the input.
     pub span: Span,
+}
+
+impl<'a> Tag<'a> {
+    /// Builds a resolved tag from the parser's `(handle, suffix)` pair.
+    ///
+    /// The parser has already applied any `%TAG` directives, so the handle is the
+    /// resolved prefix and this is a join. An empty handle AND suffix is the
+    /// non-specific tag `!`.
+    ///
+    /// Lives here, beside `Tag`, so the composer and the streaming deserialiser
+    /// build tags the same way. Two copies of this would diverge on the
+    /// non-specific case the way scalar resolution diverged in #40 — and the
+    /// resulting `Tag` is what `CoreTag::from_uri` matches against, so a
+    /// difference here changes what `!!int` means.
+    #[must_use]
+    pub fn resolve(handle: Cow<'a, str>, suffix: Cow<'a, str>, span: Span) -> Self {
+        let value = match (handle.is_empty(), suffix.is_empty()) {
+            (true, true) => Cow::Borrowed("!"),
+            // Joining with an empty half yields the other half unchanged, so
+            // passing it through keeps whatever borrow the parser already had.
+            // Formatting unconditionally would allocate a copy of the input for
+            // every tag in the document to produce the identical string.
+            (true, false) => suffix,
+            (false, true) => handle,
+            (false, false) => Cow::Owned(format!("{handle}{suffix}")),
+        };
+        Self { value, span }
+    }
 }
 
 impl Tag<'_> {
@@ -99,7 +128,7 @@ impl Tag<'_> {
     #[must_use]
     pub fn into_owned(self) -> Tag<'static> {
         Tag {
-            value: std::borrow::Cow::Owned(self.value.into_owned()),
+            value: Cow::Owned(self.value.into_owned()),
             span: self.span,
         }
     }
@@ -133,6 +162,8 @@ pub enum CollectionStyle {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Cow;
+
     use super::*;
 
     #[test]
@@ -251,6 +282,54 @@ mod tests {
         let owned: Tag<'static> = tag.into_owned();
         assert!(matches!(owned.value, Cow::Owned(_)));
         assert_eq!(&*owned.value, "!!str");
+    }
+
+    /// The four shapes the parser hands to [`Tag::resolve`].
+    ///
+    /// Handle/suffix pairs taken from the parser itself, not invented:
+    /// `!!str` -> `("tag:yaml.org,2002:", "str")`, `!` -> `("!", "")`,
+    /// `!<tag:x>` -> `("", "tag:x")`, and the empty pair for a tag the composer
+    /// synthesises. Each joins to the same URI a naive `format!` would produce;
+    /// what differs is whether the join allocates.
+    #[test]
+    fn resolve_joins_handle_and_suffix() {
+        let span = Span::point(Position::start());
+        let resolve = |h: &'static str, s: &'static str| {
+            Tag::resolve(Cow::Borrowed(h), Cow::Borrowed(s), span).value
+        };
+
+        // Neither half: the non-specific tag.
+        assert_eq!(resolve("", ""), "!");
+        // `!!str`
+        assert_eq!(
+            resolve("tag:yaml.org,2002:", "str"),
+            "tag:yaml.org,2002:str"
+        );
+        // `!` -- a handle with no suffix.
+        assert_eq!(resolve("!", ""), "!");
+        // `!<tag:x>` -- a verbatim tag, which arrives with an empty handle.
+        assert_eq!(
+            resolve("", "tag:yaml.org,2002:str"),
+            "tag:yaml.org,2002:str"
+        );
+    }
+
+    /// An empty half is passed through rather than reformatted.
+    ///
+    /// The join is `Borrowed` exactly when no concatenation was needed. This is
+    /// the difference between a verbatim tag costing nothing and costing one
+    /// allocation per tag in the document.
+    #[test]
+    fn resolve_only_allocates_when_both_halves_are_present() {
+        let span = Span::point(Position::start());
+        let resolve = |h: &'static str, s: &'static str| {
+            Tag::resolve(Cow::Borrowed(h), Cow::Borrowed(s), span).value
+        };
+
+        assert!(matches!(resolve("", "tag:x"), Cow::Borrowed(_)));
+        assert!(matches!(resolve("!", ""), Cow::Borrowed(_)));
+        assert!(matches!(resolve("", ""), Cow::Borrowed(_)));
+        assert!(matches!(resolve("!", "foo"), Cow::Owned(_)));
     }
 }
 
